@@ -1,29 +1,34 @@
 const crypto = require('crypto');
 require('dotenv').config();
 
-const algorithm = 'aes-256-cbc'; // Encryption algorithm
-const secretKey = process.env.SECRET_KEY || crypto.randomBytes(32); 
-const ivLength = 16; // Initialization vector length
+const algorithm = 'aes-256-cbc';
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '12345678901234567890123456789012';
+const ivLength = 16;
 
 exports.encrypt = (text) => {
-    const iv = crypto.randomBytes(ivLength); // Generate a random IV
-    const cipher = crypto.createCipheriv(algorithm, Buffer.from(secretKey), iv); // Create cipher
-    let encrypted = cipher.update(text, 'utf8', 'hex'); // Encrypt the text
-    encrypted += cipher.final('hex'); // Finalize the encryption
-    return `${iv.toString('hex')}:${encrypted}`; // Return IV and encrypted text
-}
+    try {
+        const iv = crypto.randomBytes(ivLength);
+        const cipher = crypto.createCipheriv(algorithm, Buffer.from(ENCRYPTION_KEY), iv);
+        let encrypted = cipher.update(text, 'utf8', 'base64');
+        encrypted += cipher.final('base64');
+        console.log('Encrypting:', { iv: iv.toString('base64'), encrypted });
+        return `${iv.toString('base64')}:${encrypted}`;
+    } catch (error) {
+        console.error('Encryption error:', error);
+        throw error;
+    }
+};
 
 exports.decrypt = (encryptedData) => {
-    const [ivHex, encryptedText] = encryptedData.split(':'); // Split IV and encrypted text
-    const iv = Buffer.from(ivHex, 'hex'); // Convert IV from hex to buffer
-    const decipher = crypto.createDecipheriv(algorithm, Buffer.from(secretKey), iv); // Create decipher
-    let decrypted = decipher.update(encryptedText, 'hex', 'utf8'); // Decrypt the text
-    decrypted += decipher.final('utf8'); // Finalize the decryption
-    return decrypted;
-}
-
-exports.generateKey = () => {
-    return crypto.randomBytes(32).toString('hex'); // Generate a random key
-}
-
-module.exports = { encrypt, decrypt, generateKey}
+    try {
+        const [ivBase64, encryptedText] = encryptedData.split(':');
+        const iv = Buffer.from(ivBase64, 'base64');
+        const decipher = crypto.createDecipheriv(algorithm, Buffer.from(ENCRYPTION_KEY), iv);
+        let decrypted = decipher.update(encryptedText, 'base64', 'utf8');
+        decrypted += decipher.final('utf8');
+        return decrypted;
+    } catch (error) {
+        console.error('Backend decryption error:', error);
+        throw error;
+    }
+};
