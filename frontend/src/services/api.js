@@ -80,11 +80,12 @@ const api = {
     },
 
     /**
-     * Get user's chats(placeholder for ChatList component)
-     * @param {String} token - JWT token
-     * @returns {Promise<Object>} - List of chats
+     * Get messages for a chat (placeholder for ChatWindow.jsx).
+     * @param {string} chatId - Chat ID.
+     * @param {string} token - JWT token.
+     * @returns {Promise<Object>} - List of messages.
      */
-    async getChats(chatId, token) {
+    async getMessages(chatId, token) {
         return this.request(`/api/chat/${chatId}/messages`, 'GET', null, token);
     },
 
@@ -99,15 +100,12 @@ const api = {
     },
 
     /**
-     * Get messages for a chat (placeholder for ChatWindow.jsx).
-     * @param {string} chatId - Chat ID.
-     * @param {string} token - JWT token.
-     * @returns {Promise<Object>} - List of messages.
+     * Get user's chats(placeholder for ChatList component)
+     * @param {String} token - JWT token
+     * @returns {Promise<Object>} - List of chats
      */
-
-    //Bu endpoint uygulamda yok getchats zaten bu işlemi yapıyor.
-    async getMessages(chatId, token) {
-        return api.request(`/api/message?chatId=${chatId}`, 'GET', null, token);
+    async getChats (token) {
+        return api.request(`/api/chat`, 'GET', null, token);
     }
 
 };

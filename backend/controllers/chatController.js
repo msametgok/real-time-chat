@@ -44,3 +44,25 @@ exports.getChatMessages = async (req, res) => {
         res.status(500).json({ message: 'Server error', error: error.message});
     }
 }
+
+exports.getUserChats = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+
+        //Fetch chats for the user
+        const chats = await Chat.find({ participants: userId})
+            .populate('participants', 'username')
+            .lean();
+
+        const formattedChats = chats.map(chat => ({
+            chatId: chat._id,
+            participants: chat.participants,
+            createdAt: chat.createdAt,
+        }));
+
+        console.log(formattedChats);
+        res.status(200).json(formattedChats);
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+}
