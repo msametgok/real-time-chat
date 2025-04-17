@@ -1,4 +1,6 @@
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+
 
 // Get user profile
 exports.getUserProfile = async (req, res) => {
@@ -22,7 +24,6 @@ exports.updateUserProfile = async (req, res) => {
         if(username) user.username = username;
         if(email) user.email = email;
         if(password) {
-            const bcrypt = require('bcryptjs');
             user.password = await bcrypt.hash(password,10);
         }
 
