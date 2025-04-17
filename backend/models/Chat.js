@@ -4,7 +4,8 @@ const chatSchema = new mongoose.Schema({
     participants: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true
+        required: true,
+        unique: true
     }],
     createdAt: {
         type: Date,
