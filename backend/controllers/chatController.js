@@ -4,13 +4,9 @@ const Message = require('../models/Message');
 exports.createChat = async (req, res) => {
     try {
         let { participantIds } = req.body; // Array of user IDs to chat with
-        const userId = req.user.userId; //from JWT
+        const userId = req.user.userId; //from JWT    
 
-        //Check if chat already exists between these participants
-        const participants = [userId, ...participantIds].sort();
-        console.log(participants);
-
-        let chat = await Chat.findOne({ participants });
+        let chat = await Chat.findOne({ participants: { $all: [userId, ...participantIds] } });
 
         if(!chat){
             chat = new Chat({ participants });
@@ -63,6 +59,53 @@ exports.getUserChats = async (req, res) => {
         console.log(formattedChats);
         res.status(200).json(formattedChats);
     } catch (error) {
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+}
+
+// DELETE CHAT
+exports.deleteChat = async (req, res) => {
+    try {
+        const { chatId } = req.params;
+        const userId = req.user.userId;
+
+        // Verify user is part of the chat
+        const chat = await Chat.findById(chatId);
+        if (!chat || !chat.participants.includes(userId)) {
+            return res.status(403).json({ message: 'Access Denied' });
+        }
+
+        await Chat.deleteOne({ _id: chatId });
+        await Message.deleteMany({ chat: chatId });
+
+        res.status(200).json({ message: 'Chat deleted successfully' });
+        
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error: error.message }); 
+    }
+}
+
+// GET CHAT DETAILS
+
+exports.getChatDetails = async (req, res) => {
+    try {
+        const { chatId } = req.params;
+        const userId = req.user.userId;
+
+        // Verify user is part of the chat
+        const chat = await Chat.findById(chatId).populate('participants', 'username').lean();
+        
+        if (!chat || !chat.participants.some(participant => participant._id.toString() === userId)) {
+            return res.status(403).json({ message: 'Access Denied' });
+        }
+
+        res.status(200).json({
+            chatId: chat._id,
+            participants: chat.participants,
+            createdAt: chat.createdAt,
+        })        
+    }
+    catch (error) {
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 }
