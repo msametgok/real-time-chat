@@ -33,3 +33,21 @@ exports.updateUserProfile = async (req, res) => {
         res.status(500).json({ message: 'Server error' });
     }
 }
+
+// Search users
+exports.searchUsers = async (req, res) => {
+
+    const keyword = req.query.keyword ? { 
+        username: { $regex: req.query.keyword, $options: 'i' } 
+    } : {};
+
+    try {
+        const users = await User.find({ ...keyword, _id: { $ne: req.user.userId} })
+            .select('_id username')
+            .lean();
+
+        res.json(users);
+    } catch (error) {
+        res.status(500).json({ message: 'Server error', error: error.message });
+    }
+}
