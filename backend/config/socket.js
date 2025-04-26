@@ -52,6 +52,9 @@ const initializeSocket = (server) => {
                 });
                 await message.save();
                 console.log('Message saved:', message._id);
+
+                // Update latestMessage in Chat
+                await Chat.findByIdAndUpdate(chatId, { latestMessage: message._id }, { new: true });
         
                 const populatedMessage = await Message.findById(message._id)
                     .populate('sender', 'username')
