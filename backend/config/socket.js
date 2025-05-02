@@ -3,6 +3,9 @@ const Message = require('../models/Message');
 const Chat = require('../models/Chat');
 const { encrypt } = require('../utils/encryption');
 const jwt = require('jsonwebtoken');
+const redis = require('../config/redis');
+const logger = require('../config/logger');
+const User = require('../models/User');
 require('dotenv').config();
 
 const initializeSocket = (server) => {
@@ -15,44 +18,39 @@ const initializeSocket = (server) => {
 
     io.use((socket, next) => {
         const token = socket.handshake.auth.token;
-        console.log('Authenticating with token:', token || 'No token provided');
+        logger.info(`Received token: ${token ? 'valid' : 'missing'}`);
         if (!token) {
-            console.error('No token provided');
+            logger.error('Socket authentication error: No token provided');
             return next(new Error('Authentication error: No token provided'));
         }
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            console.log('Token verified, user:', decoded.userId);
             socket.user = decoded;
             next();
         } catch (error) {
-            console.error('Token verification error:', error.message);
+            logger.error(`Socket authentication error: ${error.message}`);
             next(new Error('Authentication error: Invalid token'));
         }
     });
 
     io.on('connection', (socket) => {
-        console.log('New Client connected:', socket.id, 'User:', socket.user.userId);
+        logger.info(`New Client connected:, ${socket.id}, 'User:', ${socket.user?.userId || 'unknown'}`);
 
         socket.on('joinChat', (chatId) => {
-            console.log(`User ${socket.user.userId} joining chat ${chatId}`);
+            logger.info(`User ${socket.user?.userId || 'unknown'} joining chat ${chatId}`);
             socket.join(chatId);
+            socket.emit('joinChatAck', { chatId });
         });
 
         socket.on('sendMessage', async ({ chatId, content }) => {
-            console.log('Received sendMessage:', { chatId, content });
             try {
-                const encryptedContent = encrypt(content);
-                console.log('Encrypted on backend:', encryptedContent);
-        
+                const encryptedContent = encrypt(content);        
                 const message = new Message({
                     chat: chatId,
                     sender: socket.user.userId,
                     content: encryptedContent
                 });
                 await message.save();
-                console.log('Message saved:', message._id);
-
                 // Update latestMessage in Chat
                 await Chat.findByIdAndUpdate(chatId, { latestMessage: message._id }, { new: true });
         
@@ -60,16 +58,43 @@ const initializeSocket = (server) => {
                     .populate('sender', 'username')
                     .lean();
         
-                console.log('Broadcasting message:', populatedMessage);
                 io.to(chatId).emit('newMessage', populatedMessage);
+
+                //Invalidate cache for all participants
+                const chat = await Chat.findById(chatId);
+                await Promise.all(chat.participants.map(id => invalidateChatCache(id.toString())));
             } catch (error) {
-                console.error('Error processing sendMessage:', error.message);
+                logger.error(`Error processing sendMessage: ${error.message}`);
                 socket.emit('error', { message: 'Failed to send message' });
             }
         });
 
+        socket.on('typingStart', async (data) => {
+            try {
+                const { chatId } = data;
+                const key = `user:${socket.user.userId}:typing:chat:${chatId}`;
+                await redis.set(key, '1', 'EX', 5);
+                const user = await User.findById(socket.user.userId).select('username');
+                const username = user?.username || 'unknown';
+                io.to(chatId).emit('typing', { userId: socket.user.userId, username });
+            } catch (error) {
+                logger.error(`Error in typingStart: ${error.message}`);
+            }
+        });
+
+        socket.on('typingStop', async ({ chatId }) => {
+            try {
+                const key = `user:${socket.user.userId}:typing:chat:${chatId}`;
+                await redis.del(key);
+                io.to(chatId).emit('typing', { userId: socket.user.userId, stopped: true });
+            } catch (error) {
+                logger.error(`Error in typingStop: ${error.message}`);
+            }
+        });
+
+
         socket.on('disconnect', () => {
-            console.log('Client disconnected:', socket.id);
+            logger.info(`Client disconnected: ${socket.id}`);
         });
     });
 
@@ -77,3 +102,9 @@ const initializeSocket = (server) => {
 };
 
 module.exports = initializeSocket;
+
+// Helper function to invalidate cache
+const invalidateChatCache = async (userId) => {
+    const cacheKey = `user:${userId}:chats`;
+    await redis.del(cacheKey);
+};
