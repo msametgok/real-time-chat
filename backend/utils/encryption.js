@@ -2,7 +2,7 @@ const crypto = require('crypto');
 require('dotenv').config();
 
 const algorithm = 'aes-256-cbc';
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '12345678901234567890123456789012';
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
 const ivLength = 16;
 
 exports.encrypt = (text) => {
@@ -11,7 +11,6 @@ exports.encrypt = (text) => {
         const cipher = crypto.createCipheriv(algorithm, Buffer.from(ENCRYPTION_KEY), iv);
         let encrypted = cipher.update(text, 'utf8', 'base64');
         encrypted += cipher.final('base64');
-        console.log('Encrypting:', { iv: iv.toString('base64'), encrypted });
         return `${iv.toString('base64')}:${encrypted}`;
     } catch (error) {
         console.error('Encryption error:', error);
