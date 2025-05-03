@@ -1,6 +1,8 @@
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const redis = require('../config/redis');
+const logger = require('../config/logger');
 
 exports.createChat = async (req, res) => {
     try {
@@ -29,10 +31,13 @@ exports.createChat = async (req, res) => {
         if (!chat) {
             chat = new Chat({ participants: [userId, ...participantIds] });
             await chat.save();
+            //Invalidate cache for all participants
+            await Promise.all([userId, ...participantIds].map( id => invalidateCache(id)));
         }
 
         res.status(201).json({chatId: chat._id});
     } catch (error) {
+        logger.error(`Error creating chat: ${error.message}`); 
         res.status(500).json({ message: 'Server error', error: error.message});
     }
 }
@@ -72,8 +77,12 @@ exports.createGroupChat = async (req, res) => {
 
         await groupChat.save();
 
+        // Invalidate cache for all participants
+        await Promise.all([userId, ...participantIds].map(id => invalidateCache(id)));
+
         res.status(201).json({ chatId: groupChat._id });
     } catch (error) {
+        logger.error(`Error creating group chat: ${error.message}`);
         res.status(500).json({ message: 'Server error', error: error.message});
     }
 }
@@ -96,6 +105,7 @@ exports.getChatMessages = async (req, res) => {
             .lean();
         res.status(200).json(messages);
     } catch (error) {
+        logger.error(`Error in getChatMessages: ${error.message}`);
         res.status(500).json({ message: 'Server error', error: error.message});
     }
 }
@@ -103,6 +113,13 @@ exports.getChatMessages = async (req, res) => {
 exports.getUserChats = async (req, res) => {
     try {
         const userId = req.user.userId;
+        const cacheKey = `user:${userId}:chats`;
+
+        // Chech Redis cache
+        const cachedChats = await redis.get(cacheKey);
+        if (cachedChats) {
+            return res.status(200).json(JSON.parse(cachedChats));
+        }
 
         //Fetch chats for the user
         const chats = await Chat.find({ participants: userId})
@@ -126,8 +143,12 @@ exports.getUserChats = async (req, res) => {
             createdAt: chat.createdAt,
         }));
 
+        // Cache result // TTL: 5 minutes
+        await redis.set(cacheKey, JSON.stringify(formattedChats), 'EX', 300);
+
         res.status(200).json(formattedChats);
     } catch (error) {
+        logger.error(`Error in getUserChats: ${error.message}`);
         res.status(500).json({ message: 'Server error', error: error.message });
     }
 }
@@ -147,9 +168,12 @@ exports.deleteChat = async (req, res) => {
         await Chat.deleteOne({ _id: chatId });
         await Message.deleteMany({ chat: chatId });
 
+        // Invalidate cache for all participants
+        await Promise.all(chat.participants.map(id => invalidateCache(id)));
         res.status(200).json({ message: 'Chat deleted successfully' });
         
     } catch (error) {
+        logger.error(`Error in deleteChat: ${error.message}`);
         res.status(500).json({ message: 'Server error', error: error.message }); 
     }
 }
@@ -179,6 +203,18 @@ exports.getChatDetails = async (req, res) => {
         })        
     }
     catch (error) {
+        logger.error(`Error in getChatDetails: ${error.message}`);
         res.status(500).json({ message: 'Server error', error: error.message });
+    }
+}
+
+// Helper function to invalidate cache
+const invalidateCache = async (userId) => {
+    try {
+        const cacheKey = `user:${userId}:chats`;
+        await redis.del(cacheKey);
+        logger.info(`Cache invalidated for user: ${userId}`);
+    } catch (error) {
+        logger.error(`Error invalidating cache for user: ${userId}`, error);
     }
 }
