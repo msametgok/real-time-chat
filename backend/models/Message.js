@@ -16,6 +16,15 @@ const messageSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    readBy: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }],
+    status: {
+        type: String,
+        enum: ['sent', 'delivered', 'read'],
+        default: 'sent'
+    },
     createdAt: {
         type: Date,
         default: Date.now
@@ -23,12 +32,3 @@ const messageSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 module.exports = mongoose.model('Message', messageSchema);
-
-/* Daha sonra bak
-readBy: [
-    {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    }
-  ]
-*/
