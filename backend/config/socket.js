@@ -36,9 +36,14 @@ const initializeSocket = (server) => {
     io.on('connection', (socket) => {
         logger.info(`New Client connected:, ${socket.id}, 'User:', ${socket.user?.userId || 'unknown'}`);
 
-        socket.on('joinChat', (chatId) => {
+        socket.on('joinChat', async (chatId) => {
             logger.info(`User ${socket.user?.userId || 'unknown'} joining chat ${chatId}`);
             socket.join(chatId);
+            await Message.updateMany(
+                { chat: chatId, status: 'sent' },
+                { status: 'delivered' }
+            );
+            io.to(chatId).emit('messageStatus', { chatId, status: 'delivered' });
             socket.emit('joinChatAck', { chatId });
         });
 
@@ -48,7 +53,8 @@ const initializeSocket = (server) => {
                 const message = new Message({
                     chat: chatId,
                     sender: socket.user.userId,
-                    content: encryptedContent
+                    content: encryptedContent,
+                    status: 'sent'
                 });
                 await message.save();
                 // Update latestMessage in Chat
@@ -66,6 +72,19 @@ const initializeSocket = (server) => {
             } catch (error) {
                 logger.error(`Error processing sendMessage: ${error.message}`);
                 socket.emit('error', { message: 'Failed to send message' });
+            }
+        });
+
+        socket.on('markMessagesRead', async ({ chatId }) => {
+            try {
+              await Message.updateMany(
+                { chat: chatId, readBy: { $ne: socket.user.userId } },
+                { $addToSet: { readBy: socket.user.userId } }
+              );
+              io.to(chatId).emit('messagesRead', { chatId, userId: socket.user.userId });
+            } catch (error) {
+              logger.error(`Error in markMessagesRead: ${error.message}`);
+              socket.emit('error', { message: 'Failed to mark messages as read' });
             }
         });
 
