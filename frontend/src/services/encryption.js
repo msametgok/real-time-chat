@@ -1,6 +1,10 @@
 import CryptoJS from 'crypto-js';
 
-const ENCRYPTION_KEY = import.meta.env.VITE_ENCRYPTION_KEY || 'your32bytekeyhere';
+const ENCRYPTION_KEY = import.meta.env.VITE_ENCRYPTION_KEY;
+
+if (!ENCRYPTION_KEY) {
+    throw new Error('VITE_ENCRYPTION_KEY is not defined');
+}
 
 export const decrypt = (encryptedData) => {
     try {
