@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = /*port.meta.env.VITE_API_URL ||*/ 'http://localhost:5000';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const axiosInstance = axios.create({
     baseURL: API_URL,
@@ -25,19 +25,9 @@ const api = {
             const config = {
                 method,
                 url: endpoint,
+                data,
+                headers: token ? { Authorization: `Bearer ${token}` } : {}
             };
-
-            // Include data for POST/PUT requests
-            if (data) {
-                config.data = data;
-            }
-
-            // Add Authorization header if token is provided
-            if (token) {
-                config.headers = {
-                    Authorization: `Bearer ${token}`,
-                };
-            }
 
             // Make the request using axios instance
             console.log(`Making ${method} request to ${API_URL}${endpoint}`, {
