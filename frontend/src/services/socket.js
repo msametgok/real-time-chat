@@ -101,13 +101,19 @@ class SocketService {
 
     typingStart(chatId) {
         if(this.socket && this.isConnected) {
-            this.socket.emit('typingStart', chatId);
+            console.log('Emitting typingStart:', { chatId });
+            this.socket.emit('typingStart', { chatId });
+        } else {
+            console.error('Cannot start typing: Socket not connected');
         }
     }
 
     typingStop(chatId) {
-        if(this.socket && this.isConnected) {
-            this.socket.emit('typingStop', chatId);
+        if (this.socket && this.isConnected) {
+            console.log('Emitting typingStop:', { chatId });
+            this.socket.emit('typingStop', { chatId });
+        } else {
+            console.error('Cannot stop typing: Socket not connected');
         }
     }
 
