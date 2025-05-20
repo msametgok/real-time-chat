@@ -1,14 +1,25 @@
 const express = require('express');
-const { createChat, getChatMessages, getUserChats, deleteChat, getChatDetails, createGroupChat } = require('../controllers/chatController');
+const { 
+    createOneOnOneChat,
+    createGroupChat,
+    getChatMessages,
+    getUserChats,
+    deleteOrLeaveChat,
+    getChatDetails,
+} = require('../controllers/chatController');
 const verifyToken = require('../config/auth');
 
 const router = express.Router();
 
-router.post('/create', verifyToken, createChat);
-router.get('/:chatId/messages', verifyToken, getChatMessages);
-router.get('/', verifyToken, getUserChats);
-router.delete('/:chatId', verifyToken, deleteChat)
-router.get('/:chatId', verifyToken, getChatDetails);
-router.post('/group', verifyToken, createGroupChat);
+router.use(verifyToken);
+
+router.post('/one-on-one', createOneOnOneChat);
+router.post('/group', createGroupChat);
+router.get('/', getUserChats);
+router.get('/:chatId/messages', getChatMessages);
+router.get('/:chatId', getChatDetails);
+router.delete('/:chatId', deleteOrLeaveChat)
+
+
 
 module.exports = router;
