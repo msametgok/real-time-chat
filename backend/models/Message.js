@@ -42,6 +42,11 @@ const messageSchema = new mongoose.Schema({
     metadata: {
         type: mongoose.Schema.Types.Mixed,
     },
+    deliveredTo: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }
+    ],
     readBy: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
@@ -63,7 +68,13 @@ messageSchema.post('save', async function(doc, next) {
         });
         next();
     } catch (error) {
-        console.error(`Error updating latestMessage in Chat`, error);
+        // Use the logger if available, otherwise console.error
+        const logger = mongoose.model('Message').logger;
+        if (logger && logger.error) {
+            logger.error(`Error updating latestMessage in Chat from Message post-save hook for message ${doc._id}: ${error.message}`, error);
+        } else {
+            console.error(`Error updating latestMessage in Chat from Message post-save hook for message ${doc._id}: ${error.message}`, error);
+        }
         next(error);
     }
 });
