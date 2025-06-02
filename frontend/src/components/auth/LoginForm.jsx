@@ -1,77 +1,118 @@
-import { useState } from "react";
-import {useAuth} from "../../hooks/useAuth";
+import React, { useState } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "../../hooks/useAuth";
 import ErrorMessage from "../common/ErrorMessage";
 import LoadingSpinner from "../common/LoadingSpinner";
-import {Link} from "react-router-dom";
 
 function LoginForm() {
-    const { login, loading } = useAuth();
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [error, setError] = useState('');
+  const { login, loading: authLoading, authError } = useAuth();
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        try {
-            setError('');
-            await login(email, password);
-        } catch (error) {
-            setError(error.message)
-        }
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [localError, setLocalError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLocalError("");
+
+    if (!email || !password) {
+      setLocalError("Please enter both email and password");
+      return;
     }
 
-    return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-100 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8">
-            <h2 className="text-3xl font-bold text-gray-900 text-center mb-6">Sign In</h2>
-            {error && <ErrorMessage message={error} />}
-            {loading && <LoadingSpinner />}
-            <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                Email
-                </label>
-                <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                placeholder="you@example.com"
-                />
-            </div>
-            <div>
-                <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-                Password
-                </label>
-                <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                placeholder="••••••••"
-                />
-            </div>
-            <button
-                type="submit"
-                disabled={loading}
-                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-400 disabled:cursor-not-allowed"
-            >
-                {loading ? 'Signing In...' : 'Sign In'}
-            </button>
-            </form>
-            <p className="mt-4 text-center text-sm text-gray-600">
-            Don’t have an account?{' '}
-            <Link to="/register" className="font-medium text-blue-600 hover:text-blue-500">
-                Sign up
-            </Link>
-            </p>
+    try {
+      await login(email, password);
+    } catch (error) {
+      console.log("LoginForm: Submission error", error);
+      setLocalError(error.message);
+    }
+  };
+
+  return (
+    // This container matches the main card from your HTML
+    <div className="bg-slate-800 p-8 md:p-12 rounded-xl shadow-2xl w-full max-w-md">
+      <div className="text-center mb-8">
+        <h1 className="text-4xl font-bold text-white">Welcome Back</h1>
+        <p className="text-slate-400 mt-2">Sign in to continue to your account.</p>
+      </div>
+
+      {/* Display global auth errors or local form errors */}
+      {(authError || localError) && (
+        <div className="mb-4">
+          <ErrorMessage message={authError || localError} />
         </div>
+      )}
+      
+      {/* The form element itself - action and method are handled by React's onSubmit */}
+      <form onSubmit={handleSubmit} noValidate>
+        <div className="mb-6">
+          <label htmlFor="email" className="block text-sm font-medium text-slate-300 mb-2">
+            Email Address
+          </label>
+          <input
+            type="email"
+            name="email"
+            id="email"
+            className="form-input w-full px-4 py-3 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out"
+            placeholder="you@example.com"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={authLoading}
+          />
         </div>
-    )
+
+        <div className="mb-6">
+          <div className="flex justify-between items-center mb-2">
+            <label htmlFor="password" className="block text-sm font-medium text-slate-300">
+              Password
+            </label>
+            {/* "Forgot password?" link - can be a <Link> to a route later */}
+            <a href="#" className="text-sm text-indigo-400 hover:text-indigo-300 transition duration-150 ease-in-out">
+              Forgot password?
+            </a>
+          </div>
+          <input
+            type="password"
+            name="password"
+            id="password"
+            className="form-input w-full px-4 py-3 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out"
+            placeholder="••••••••"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={authLoading}
+          />
+        </div>
+
+        <div className="mb-6">
+          <button
+            type="submit"
+            disabled={authLoading}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-800 transition duration-150 ease-in-out transform hover:scale-105 disabled:opacity-70 disabled:cursor-not-allowed"
+          >
+            {authLoading ? (
+              <div className="flex items-center justify-center">
+                <LoadingSpinner /> {/* Using your spinner component */}
+                <span className="ml-2">Signing In...</span>
+              </div>
+            ) : (
+              'Login'
+            )}
+          </button>
+        </div>
+      </form>
+
+      <div className="text-center">
+        <p className="text-sm text-slate-400">
+          Not a member yet?{' '}
+          <Link to="/register" className="font-medium text-indigo-400 hover:text-indigo-300 transition duration-150 ease-in-out">
+            Register
+          </Link>
+        </p>
+      </div>
+    </div>
+  );
 }
 
 export default LoginForm;
