@@ -1,94 +1,175 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
+import { Link } from "react-router-dom";
 import ErrorMessage from "../common/ErrorMessage";
 import LoadingSpinner from "../common/LoadingSpinner";
-import { Link } from "react-router-dom";
 
 function RegisterForm() {
-    const { register, loading } = useAuth();
+    const { register, loading: authLoading, authError } = useAuth();
+
     const [username, setUsername] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
-    const [error, setError] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [agreedToTerms, setAgreedToTerms] = useState(false);
+    const [localError, setLocalError] = useState("");
 
     // ** Add confirm password later **
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        setLocalError("");
+
+        if (!username || !email || !password || !confirmPassword) {
+          setLocalError("Please fill in all fields");
+          return;
+        }
+        if (password !== confirmPassword) {
+            setLocalError("Passwords do not match");
+            return;
+        }
+        if (!agreedToTerms) {
+            setLocalError("You must agree to the Terms of Service to register");
+            return;
+        }
+
         try {
-            setError("");
             await register(username, email, password);
         } catch (error) {
-            setError(error.message);
+          console.log("Registration error:", error);
         }
     }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-100 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8">
-        <h2 className="text-3xl font-bold text-gray-900 text-center mb-6">Sign Up</h2>
-        {error && <ErrorMessage message={error} />}
-        {loading && <LoadingSpinner />}
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label htmlFor="username" className="block text-sm font-medium text-gray-700">
-              Username
-            </label>
-            <input
-              id="username"
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-              placeholder="johndoe"
-            />
-          </div>
-          <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-              placeholder="you@example.com"
-            />
-          </div>
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-              placeholder="••••••••"
-            />
-          </div>
+    <div className="bg-slate-800 p-8 md:p-12 rounded-xl shadow-2xl w-full max-w-md">
+      <div className="text-center mb-8">
+        <h1 className="text-4xl font-bold text-white">Create Account</h1>
+        <p className="text-slate-400 mt-2">Join us and start chatting today!</p>
+      </div>
+
+      {(authError || localError) && (
+        <div className="mb-4">
+          <ErrorMessage message={authError || localError} />
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} noValidate className="space-y-6">
+        <div>
+          <label htmlFor="username-register" className="block text-sm font-medium text-slate-300 mb-2">
+            Username
+          </label>
+          <input
+            type="text"
+            name="username"
+            id="username-register"
+            className="form-input w-full px-4 py-3 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out"
+            placeholder="yourusername"
+            required
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            disabled={authLoading}
+            autoComplete="username"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="email-register" className="block text-sm font-medium text-slate-300 mb-2">
+            Email Address
+          </label>
+          <input
+            type="email"
+            name="email"
+            id="email-register"
+            className="form-input w-full px-4 py-3 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out"
+            placeholder="you@example.com"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={authLoading}
+            autoComplete="email"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="password-register" className="block text-sm font-medium text-slate-300 mb-2">
+            Password
+          </label>
+          <input
+            type="password"
+            name="password"
+            id="password-register"
+            className="form-input w-full px-4 py-3 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out"
+            placeholder="•••••••• (min. 6 characters)"
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            disabled={authLoading}
+            autoComplete="new-password"
+          />
+        </div>
+
+        <div className="mb-6">
+          <label htmlFor="confirm-password" className="block text-sm font-medium text-slate-300 mb-2">
+            Confirm Password
+          </label>
+          <input
+            type="password"
+            name="confirmPassword"
+            id="confirm-password"
+            className="form-input w-full px-4 py-3 rounded-lg bg-slate-700 border border-slate-600 text-white placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 ease-in-out"
+            placeholder="••••••••"
+            required
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            disabled={authLoading}
+            autoComplete="new-password"
+          />
+        </div>
+
+        <div className="mb-6 flex items-center">
+          <input
+            type="checkbox"
+            name="terms"
+            id="terms"
+            className="h-4 w-4 text-indigo-600 border-slate-500 rounded focus:ring-indigo-500 bg-slate-700"
+            checked={agreedToTerms}
+            onChange={(e) => setAgreedToTerms(e.target.checked)}
+            disabled={authLoading}
+            required // Makes the form element itself require it, good for accessibility too
+          />
+          <label htmlFor="terms" className="ml-2 block text-sm text-slate-400">
+            I agree to the <a href="/terms-of-service" target="_blank" rel="noopener noreferrer" className="font-medium text-indigo-400 hover:text-indigo-300">Terms of Service</a>
+          </label>
+        </div>
+        
+        <div className="mb-6">
           <button
             type="submit"
-            disabled={loading}
-            className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-400 disabled:cursor-not-allowed"
+            disabled={authLoading || !agreedToTerms}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-800 transition duration-150 ease-in-out transform hover:scale-105 disabled:opacity-70 disabled:cursor-not-allowed"
           >
-            {loading ? 'Signing Up...' : 'Sign Up'}
+            {authLoading ? (
+              <div className="flex items-center justify-center">
+                <LoadingSpinner />
+                <span className="ml-2">Creating Account...</span>
+              </div>
+            ) : (
+              'Create Account'
+            )}
           </button>
-        </form>
-        <p className="mt-4 text-center text-sm text-gray-600">
+        </div>
+      </form>
+
+      <div className="text-center mt-6">
+        <p className="text-sm text-slate-400">
           Already have an account?{' '}
-          <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
-            Sign in
+          <Link to="/login" className="font-medium text-indigo-400 hover:text-indigo-300 transition duration-150 ease-in-out">
+            Sign In
           </Link>
         </p>
       </div>
     </div>
-    )
+  );
 }
 
 export default RegisterForm;
