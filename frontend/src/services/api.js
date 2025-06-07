@@ -42,9 +42,11 @@ const api = {
             return response.data;
 
         } catch (error) {
-            const errorMessage = error.response?.data?.message || error.message || 'HHTP error at ${endpoint}';
-            console.error(`API error at ${endpoint}:`, errorMessage);
-            throw new Error(errorMessage);
+            const errorMessage = error.response?.data?.message || error.message || `HHTP error at ${endpoint}`;
+            console.error(`API error at ${method} ${API_URL}${endpoint}:`, errorMessage);
+            const errToThrow = new Error(errorMessage);
+            errToThrow.response = error.response; 
+            throw errToThrow;
         }
     },
 
@@ -80,23 +82,53 @@ const api = {
     },
 
     /**
-     * Create a new chat (placeholder for ChatList.jsx).
-     * @param {string[]} participantIds - Array of user IDs.
-     * @param {string} token - JWT token.
-     * @returns {Promise<Object>} - { message, chatId }.
-     */
-    async createChat(participantIds, token) {
-        return api.request('/api/chat/create', 'POST', { participantIds }, token);
+    * Get current user profile
+    * @param {String} token - JWT token
+    * @returns {Promise<Object>} - User profile data
+    */
+    async getCurrentUserProfile(token) {
+        return this.request('/api/users/profile', 'GET', null, token);
     },
 
     /**
-     * Get user's chats(placeholder for ChatList component)
-     * @param {String} token - JWT token
-     * @returns {Promise<Object>} - List of chats
+     * 
+     * @param {String} token 
+     * @returns {Promise<Object>} - List of user chats
      */
-    async getChats (token) {
-        return api.request(`/api/chat`, 'GET', null, token);
-    }
+    async getUserChats(token) {
+        return this.request('/api/chat', 'GET', null, token);
+    },
+
+    async getChatMessages(chatId, token, limit = 30, beforeTimestamp = null) {
+        let endpoint = `/api/chat/${chatId}/messages?limit=${limit}`;
+        if (beforeTimestamp) {
+            endpoint += `&before=${encodeURIComponent(beforeTimestamp)}`;
+        }
+        return this.request(endpoint, 'GET', null, token);
+    },
+
+    /**
+     * Create a new one on one chat
+     * @param {string[]} otherUserId - Array of user IDs.
+     * @param {string} token - JWT token.
+     * @returns {Promise<Object>} - Created one-on-one chat data
+     */
+
+    async createOneOnOneChat(otherUserId, token) {
+        return this.request('/api/chat/one-on-one', 'POST', { otherUserId }, token);
+    },
+
+    /**
+     * Create a new group chat
+     * @param {string} chatName - Name of the group chat
+     * @param {string[]} participantIds - Array of user IDs to add to the group chat
+     * @param {string} token - JWT token
+     * @returns {Promise<Object>} - Created group chat data
+     */
+
+    async createGroupChat(chatName, participantIds, token) {
+        return this.request('/api/chat/group', 'POST', { chatName, participantIds }, token);   
+    },
 
 };
 
