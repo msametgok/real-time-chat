@@ -76,7 +76,7 @@ module.exports = ({ io, socket, logger, User, Chat, Message, encrypt, decrypt, i
     });
 
     socket.on('sendMessage', async (data) => {
-        const { chatId, messageType, content, fileUrl, fileName, fileType, fileSize } = data || {};
+        const { chatId, messageType, content, fileUrl, fileName, fileType, fileSize, tempId } = data || {};
         const userId = socket.user.userId;
         const username = socket.user.username;
 
