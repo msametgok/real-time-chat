@@ -42,7 +42,7 @@ const api = {
             return response.data;
 
         } catch (error) {
-            const errorMessage = error.response?.data?.message || error.message || `HHTP error at ${endpoint}`;
+            const errorMessage = error.response?.data?.message || error.message || `HTTP error at ${endpoint}`;
             console.error(`API error at ${method} ${API_URL}${endpoint}:`, errorMessage);
             const errToThrow = new Error(errorMessage);
             errToThrow.response = error.response; 
