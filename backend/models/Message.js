@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const logger = require('../config/logger');
 
 const messageSchema = new mongoose.Schema({
     chat: {
@@ -68,13 +69,8 @@ messageSchema.post('save', async function(doc, next) {
         });
         next();
     } catch (error) {
-        // Use the logger if available, otherwise console.error
-        const logger = mongoose.model('Message').logger;
-        if (logger && logger.error) {
-            logger.error(`Error updating latestMessage in Chat from Message post-save hook for message ${doc._id}: ${error.message}`, error);
-        } else {
-            console.error(`Error updating latestMessage in Chat from Message post-save hook for message ${doc._id}: ${error.message}`, error);
-        }
+        logger.error(`Error updating latestMessage in Chat from Message post-save hook for message ${doc._id}: ${error.message}`, error);
+        //console.error(`Error updating latestMessage in Chat from Message post-save hook for message ${doc._id}: ${error.message}`, error);
         next(error);
     }
 });
