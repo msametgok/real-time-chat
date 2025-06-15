@@ -53,9 +53,9 @@ exports.updateCurrentUserProfile = [
     body('currentPassword').if(body('password').notEmpty())
             .notEmpty().withMessage('Current password is required to change password'),
     body('avatar').optional().trim()
-        .if((value, {req}) => {
+        .if((value, {req}) => 
             req.body.avatar !== null && req.body.avatar !== ''
-        }).isURL().withMessage('Avatar must be a valid URL if provided Use null or an empty string to remove it'),
+        ).isURL().withMessage('Avatar must be a valid URL if provided Use null or an empty string to remove it'),
     
     async (req, res) => {
         const errors = validationResult(req);
