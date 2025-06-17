@@ -149,15 +149,12 @@ module.exports = ({ io, socket, logger, Message, Chat }) => {
 
                 const deliveredToAll = areAllOtherParticipantsInArray(message.deliveredTo, chat.participants, message.sender);
 
-                const senderSocket = findSocketByUserId(io, message.sender.toString());
-                if (senderSocket) {
-                    senderSocket.emit('messageDeliveryUpdate', {
-                        chatId,
-                        messageId,
-                        deliveredToUserId: recipientUserId,
-                        deliveredToAll: deliveredToAll,
-                    });
-                }
+                io.to(chatId).emit('messageDeliveryUpdate', {
+                    chatId,
+                    messageId,
+                    deliveredToUserId: recipientUserId,
+                    deliveredToAll: deliveredToAll,
+                });
             } else {
                 logger.info(`Message ${messageId} already marked delivered to ${recipientUsername}.`);
             }
