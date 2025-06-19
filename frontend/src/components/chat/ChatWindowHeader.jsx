@@ -1,60 +1,71 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { useChat } from '../../hooks/useChat';
+import { useAuth } from '../../hooks/useAuth';
+import { ChevronLeft } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 
 function ChatWindowHeader() {
-    const { activeChat } = useChat();
+  const { activeChat, selectChat } = useChat();
+  const { user } = useAuth();
 
-    if (!activeChat) {
-        return null;
+  const participantInfo = useMemo(() => {
+    if (!activeChat) return "";
+    const { isGroupChat, participants = [] } = activeChat;
+    if (!isGroupChat && participants.length === 2) {
+      const other = participants.find(p => p._id !== user._id);
+      if (other?.onlineStatus === 'online') {
+        return 'Online';
+      }
+      if (other?.lastSeen) {
+        return `Last seen ${formatDistanceToNow(new Date(other.lastSeen))} ago`;
+      }
+      return 'Offline';
     }
+    return `${participants.length} members`;
+  }, [activeChat, user._id]);
 
-    const { displayChatName, chatAvatar, isGroupChat } = activeChat;
+  if (!activeChat) {
+    return null;
+  }
 
-    // For 1-on-1 chats, show user's online status
-    const getOtherParticipantStatus = () => {
-        if (!isGroupChat && activeChat.participants.length === 2) {
-            const otherParticipant = activeChat.participants[0];
-            return `${activeChat.participants.length} members`
-        }
-        return `${activeChat.participants.length} members`;
-    }
+  const { displayChatName, chatAvatar } = activeChat;
 
-    return (
-    <div className="flex sm:items-center justify-between py-3 px-4 border-b-2 border-slate-700">
-      <div className="relative flex items-center space-x-4">
-        <div className="relative">
-          <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-indigo-400 text-white font-semibold overflow-hidden flex-shrink-0 flex items-center justify-center">
-            {chatAvatar ? (
-              <img src={chatAvatar} alt={displayChatName} className="w-full h-full object-cover" />
-            ) : (
-              (displayChatName || 'C')?.charAt(0).toUpperCase()
-            )}
-          </div>
-          {/* Online status indicator - we can wire this up later */}
-          {/* <span className="absolute text-green-500 right-0 bottom-0">
-            <svg width="20" height="20">
-              <circle cx="8" cy="8" r="8" fill="currentColor"></circle>
-            </svg>
-          </span> */}
-        </div>
-        <div className="flex flex-col leading-tight">
-          <div className="text-lg sm:text-xl font-semibold mt-1 flex items-center">
-            <span className="text-slate-200 mr-3">{displayChatName || 'Chat'}</span>
-          </div>
-          <span className="text-xs sm:text-sm text-slate-500">
-            {getOtherParticipantStatus()}
-          </span>
-        </div>
-      </div>
-      <div className="flex items-center space-x-2">
-        {/* Placeholder for action buttons like call, video call, info */}
-        <button type="button" className="inline-flex items-center justify-center rounded-lg border h-10 w-10 sm:h-12 sm:w-12 transition duration-500 ease-in-out text-slate-400 hover:bg-slate-700 focus:outline-none">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="h-6 w-6">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-          </svg>
+  return (
+    <header className="flex items-center justify-between py-3 px-4 bg-slate-800 backdrop-blur-sm shadow-sm border-b border-slate-700">
+      {/* Left side: back button (<md) + avatar */}
+      <div className="flex items-center space-x-3">
+        {/* Back arrow only on screens narrower than md */}
+        <button
+          onClick={() => selectChat(null)}
+          className="md:hidden inline-flex items-center justify-center text-slate-400 hover:text-white focus:outline-none"
+          aria-label="Back to chat list"
+          title="Back"
+        >
+          <ChevronLeft size={24} />
         </button>
+
+        {/* Avatar */}
+        <div className="h-10 w-10 rounded-full bg-indigo-400 text-white font-semibold overflow-hidden flex items-center justify-center flex-shrink-0"
+        role="img"
+        aria-label={`Avatar of ${displayChatName}`}>
+          {chatAvatar
+            ? <img src={chatAvatar} alt={displayChatName} className="w-full h-full object-cover" />
+            : (displayChatName?.charAt(0).toUpperCase() || 'C')}
+        </div>
+
+        {/* Title and member count */}
+        <div className="flex flex-col leading-tight overflow-hidden">
+          <h1 className="text-lg font-semibold text-slate-200 truncate">
+            {displayChatName || 'Chat'}
+          </h1>
+          <p className="text-xs text-slate-500 truncate">
+            {participantInfo}
+          </p>
+        </div>
       </div>
-    </div>
+
+      {/* Right side intentionally left blank (for future controls) */}
+    </header>
   );
 }
 
