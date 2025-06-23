@@ -16,20 +16,12 @@ const initializeDisconnectHandlers = require('../socketHandlers/disconnectEvents
 
 // Helper function to invalidate chat cache
 const invalidateChatCache = async (userIds) => {
-    if (!Array.isArray(userIds)) {
-        userIds = [userIds].filter(id => id); // Filter out null/undefined
-    } else {
-        userIds = userIds.filter(id => id);
-    }
+    if (!Array.isArray(userIds)) userIds = [userIds].filter(Boolean);
     if (userIds.length === 0) return;
 
     try {
-        const promises = userIds.map(id => {
-            const cacheKey = `user:${id.toString()}:chats`;
-            return redis.del(cacheKey);
-        });
-        await Promise.all(promises);
-        logger.info(`Socket: Chat cache invalidated for users: ${userIds.join(', ')}`);
+        await Promise.all(userIds.map(id => redis.del(`user:${id}:chats`)));
+        logger.info(`Cache invalidated for users: ${userIds.join(', ')}`);
     } catch (error) {
         logger.error(`Socket: Error invalidating chat cache for users ${userIds.join(', ')}: ${error.message}`, error);
     }
@@ -39,7 +31,7 @@ const invalidateChatCache = async (userIds) => {
 const initializeSocket = (server) => {
     const io = socketIo(server, {
         cors: {
-            origin: process.env.CLIENT_URL || "http://localhost:5173", // Use env variable from your frontend
+            origin: process.env.CLIENT_URL,
             methods: ["GET", "POST"],
             credentials: true
         },
@@ -76,40 +68,58 @@ const initializeSocket = (server) => {
     });
 
     // Main connection event
-    io.on('connection', (socket) => {
-        logger.info(`New client connected: ${socket.id}, User: ${socket.user.username} (ID: ${socket.user.userId})`);
+    io.on('connection', async (socket) => {
 
-        // Package all dependencies for handlers
-        const handlerDependencies = {
-            io,
-            socket,
-            logger,
-            redis,
-            User,
-            Chat,
-            Message,
-            encrypt,
-            decrypt,
-            invalidateChatCache // Pass the cache invalidation helper
-        };
+        try {
+            const { userId, username } = socket.user;
+            const socketKey = `userSockets:${userId}`;
 
-        // Register event handlers from separate modules
-        initializeChatEventHandlers(handlerDependencies);
-        initializeTypingEventHandlers(handlerDependencies);
-        initializeStatusEventHandlers(handlerDependencies);
-        initializeDisconnectHandlers(handlerDependencies);
-
-        // Example: A simple ping-pong to check connection
-        socket.on('ping', (callback) => {
-            logger.info(`Ping received from ${socket.user.username}. Responding with pong.`);
-            if (typeof callback === 'function') {
-                callback('pong');
+            // Presence: Track sockets in Redis
+            await redis.sadd(socketKey, socket.id);
+            const openCount = await redis.scard(socketKey);
+            if (openCount === 1) {
+                const rooms = await Chat.find({ participants: userId }).select('_id').lean();
+                rooms.forEach(({ _id }) => io.to(_id.toString()).emit('userStatusUpdate', {
+                    chatId: _id.toString(),
+                    userId,
+                    username,
+                    onlineStatus: 'online',
+                    lastSeen: null
+                }));
+                logger.info(`Online broadcast for ${username}`);
             }
-        });
 
-        socket.on('error', (error) => {
-            logger.error(`Socket Error for user ${socket.user?.userId} on socket ${socket.id}: ${error.message}`, error);
-        });
+            // Auto-join all rooms
+            const userChats = await Chat.find({ participants: userId }).select('_id').lean();
+            userChats.forEach(({ _id }) => socket.join(_id.toString()));
+            logger.info(`User ${username} auto-joined ${userChats.length} rooms`);
+            
+            // Package all dependencies for handlers
+            const handlerDependencies = {
+                io,
+                socket,
+                logger,
+                redis,
+                User,
+                Chat,
+                Message,
+                encrypt,
+                decrypt,
+                invalidateChatCache // Pass the cache invalidation helper
+            };
+
+            // Register event handlers from separate modules
+            initializeChatEventHandlers(handlerDependencies);
+            initializeTypingEventHandlers(handlerDependencies);
+            initializeStatusEventHandlers(handlerDependencies);
+            initializeDisconnectHandlers(handlerDependencies);
+
+            socket.on('error', (error) => {
+                logger.error(`Socket Error for user ${socket.user?.userId} on socket ${socket.id}: ${error.message}`, error);
+            });
+        } catch (error) {
+            logger.error(`Error in connection handler for socket ${socket.id}: ${error.message}`, error);
+        }
     });
 
     logger.info('Socket.IO server initialized and authentication middleware configured.');
