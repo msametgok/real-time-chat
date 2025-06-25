@@ -1,4 +1,5 @@
 import React from "react";
+import MessageStatusTicks from "./MessageStatusTicks";
 
 const formatMessageTime = (timestamp) => {
     if (!timestamp) return "";
@@ -6,52 +7,6 @@ const formatMessageTime = (timestamp) => {
         hour: "2-digit",
         minute: "2-digit",
     })
-}
-
-const MessageStatusTicks = ({ message }) => {
-    const isReadByAll = message.isReadByAll;
-    const isDeliveredToAll = message.deliveredToAll;
-
-    // --- DEBUGGING LOG ADDED HERE ---
-  if (message.content.startsWith("Ticks test")) { // Change this to match your test message
-     console.log(
-        `%c[TICKS RENDER] For message "${message.content}":`,
-        'color: #dc3545;',
-        { isDeliveredToAll, isReadByAll }
-     );
-  }
-
-    const tickColor = isReadByAll ? 'text-red-500' : 'text-slate-500';
-
-    if (isDeliveredToAll || isReadByAll) {
-        return (
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                className={`w-5 h-5 ${tickColor}`}
-                aria-label={isReadByAll ? "Read by all" : "Delivered"}
-            >
-                <path fillRule="evenodd" d="M16.28 7.22a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06 0l-3.5-3.5a.75.75 0 111.06-1.06l2.97 2.97 6.97-6.97a.75.75 0 011.06 0zm-2.25 1.5a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06 0l-3.5-3.5a.75.75 0 111.06-1.06l2.97 2.97 6.97-6.97a.75.75 0 011.06 0z" clipRule="evenodd" />
-            </svg>
-        ); 
-    }
-
-    if (message.status === 'sent') {
-        return (
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="currentColor"
-                className="w-5 h-5 text-slate-500"
-                aria-label="Sent"
-            >
-                <path fillRule="evenodd" d="M16.28 7.22a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06 0l-3.5-3.5a.75.75 0 111.06-1.06l2.97 2.97 6.97-6.97a.75.75 0 011.06 0z" clipRule="evenodd" />
-            </svg>
-        );        
-    }
-
-    return null;
 }
 
 function MessageBubble({ message, isOwnMessage, showSenderInfo }) {
