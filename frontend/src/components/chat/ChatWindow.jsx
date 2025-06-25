@@ -1,10 +1,46 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo } from "react";
 import { useChat } from '../../hooks/useChat';
 import { useAuth } from '../../hooks/useAuth';
 import socketService from '../../services/socket'
 import ChatWindowHeader from "./ChatWindowHeader";
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
+
+// A new component to display the typing indicator
+const TypingIndicator = () => {
+    const { typingUsers } = useChat();
+    const { user } = useAuth();
+
+    // Create a memoized list of users currently typing IN THIS CHAT
+    const currentlyTyping = useMemo(() =>
+        Object.entries(typingUsers)
+            .filter(([userId, typingUser]) => typingUser && userId !== user?._id)
+            // FIX: Access the 'username' property from the second element (the value)
+            .map(([userId, typingUser]) => typingUser.username), 
+        [typingUsers, user?._id]
+    );
+
+    // If no one else is typing, render an empty div to maintain layout space
+    if (currentlyTyping.length === 0) {
+        return <div className="h-6 px-4"></div>;
+    }
+
+    // Build the display text based on who is typing
+    let text = '';
+    if (currentlyTyping.length === 1) {
+        text = `${currentlyTyping[0]} is typing...`;
+    } else if (currentlyTyping.length === 2) {
+        text = `${currentlyTyping[0]} and ${currentlyTyping[1]} are typing...`;
+    } else {
+        text = 'Several people are typing...';
+    }
+
+    return (
+        <div className="h-6 px-4 text-sm text-slate-400 italic animate-pulse">
+        {text}
+        </div>
+    );
+};
 
 function ChatWindow() {
     const { activeChat, messages } = useChat();
@@ -17,15 +53,28 @@ function ChatWindow() {
         }
 
         // Find all messages in the active chat that were sent by others and that the current user hasn't read yet
-        const unreadMessageIds = messages.filter(msg => 
+        const unreadMessages = messages.filter(msg =>
             msg.sender?.id !== user._id && !msg.readBy?.includes(user._id)
         );
 
-        if (unreadMessageIds.length > 0) {
+        if (unreadMessages.length > 0) {
+            // FIX: Map the array of message objects to an array of message IDs
+            const unreadMessageIds = unreadMessages.map(msg => msg._id);
             console.log(`Emitting markMessagesAsRead for ${unreadMessageIds.length} messages...`);
-            // Tell the server that the current user has read them
             socketService.markMessagesAsRead(activeChat._id, unreadMessageIds);
         }
+    }, [messages, activeChat, user]);
+
+    useEffect(() => {
+        if (!activeChat || !user || messages.length === 0) return;
+
+        // For every undelivered message, emit a delivery receipt
+        messages.forEach(m => {
+            const already = (m.deliveredTo || []).map(d => d.toString());
+            if (m.sender?._id !== user._id && !already.includes(user._id)) {
+                socketService.messageDeliveredToClient(m._id, activeChat._id);
+            }
+        });
     }, [messages, activeChat, user]);
 
     const handleSendMessage = (messageContent) => {
@@ -68,15 +117,16 @@ function ChatWindow() {
     }
 
     return (
-        <div className="flex flex-col flex-auto h-full p-0 md:p-6 md:pl-0">
-            <div className="flex flex-col flex-auto flex-shrink-0 rounded-2xl bg-slate-800 h-full">
+        <div className="flex flex-col flex-auto h-full">
+            <div className="flex flex-col flex-auto flex-shrink-0 bg-slate-800 h-full">
                 <ChatWindowHeader />
                 <MessageList />
+                <TypingIndicator /> 
                 <MessageInput
                 onSendMessage={handleSendMessage}
                 onTypingStart={handleTypingStart}
                 onTypingStop={handleTypingStop}
-            />
+                />
             </div>
         </div>
     );
