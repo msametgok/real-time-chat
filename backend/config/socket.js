@@ -68,59 +68,123 @@ const initializeSocket = (server) => {
     });
 
     // Main connection event
-    io.on('connection', async (socket) => {
+io.on('connection', async (socket) => {
+  try {
+    const { userId, username } = socket.user;
 
-        try {
-            const { userId, username } = socket.user;
-            const socketKey = `userSockets:${userId}`;
+    // ─── Join a personal room for this user ───
+    // Allows us to ask “who’s online?” via io.in(`user-${userId}`).allSockets()
+    socket.join(`user-${userId}`);
 
-            // Presence: Track sockets in Redis
-            await redis.sadd(socketKey, socket.id);
-            const openCount = await redis.scard(socketKey);
-            if (openCount === 1) {
-                const rooms = await Chat.find({ participants: userId }).select('_id').lean();
-                rooms.forEach(({ _id }) => io.to(_id.toString()).emit('userStatusUpdate', {
-                    chatId: _id.toString(),
-                    userId,
-                    username,
-                    onlineStatus: 'online',
-                    lastSeen: null
-                }));
-                logger.info(`Online broadcast for ${username}`);
-            }
+    const socketKey = `userSockets:${userId}`;
 
-            // Auto-join all rooms
-            const userChats = await Chat.find({ participants: userId }).select('_id').lean();
-            userChats.forEach(({ _id }) => socket.join(_id.toString()));
-            logger.info(`User ${username} auto-joined ${userChats.length} rooms`);
-            
-            // Package all dependencies for handlers
-            const handlerDependencies = {
-                io,
-                socket,
-                logger,
-                redis,
-                User,
-                Chat,
-                Message,
-                encrypt,
-                decrypt,
-                invalidateChatCache // Pass the cache invalidation helper
-            };
+    // Fetch *all* live socket IDs from Socket.IO
+    const liveSockets = await io.in(`user-${userId}`).allSockets();
 
-            // Register event handlers from separate modules
-            initializeChatEventHandlers(handlerDependencies);
-            initializeTypingEventHandlers(handlerDependencies);
-            initializeStatusEventHandlers(handlerDependencies);
-            initializeDisconnectHandlers(handlerDependencies);
+    // Overwrite Redis with the truly live ones
+    await redis.del(socketKey);
+    if (liveSockets.size) {
+      await redis.sadd(socketKey, ...Array.from(liveSockets));
+    }
+    const openCount = await redis.scard(socketKey);
 
-            socket.on('error', (error) => {
-                logger.error(`Socket Error for user ${socket.user?.userId} on socket ${socket.id}: ${error.message}`, error);
-            });
-        } catch (error) {
-            logger.error(`Error in connection handler for socket ${socket.id}: ${error.message}`, error);
-        }
+    console.log(openCount, socketKey);
+
+    if (openCount === 1) {
+  // 1) Fetch every chat and its participants
+  const rooms = await Chat.find({ participants: userId })
+                          .select('_id participants')
+                          .lean();
+
+  // 2) Broadcast “online” / “joined” status
+  rooms.forEach(({ _id }) => {
+    io.to(_id.toString()).emit('userStatusUpdate', {
+      chatId:       _id.toString(),
+      userId,
+      username,
+      onlineStatus: 'online',
+      lastSeen:     null
     });
+    io.to(_id.toString()).emit('userConnectedToChat', {
+      chatId:  _id.toString(),
+      userId,
+      username
+    });
+  });
+
+  // 3) Sync all undelivered messages for this user
+  for (const { _id: chatId, participants } of rooms) {
+    // a) find messages they haven’t yet delivered
+    const undelivered = await Message.find({
+      chat:        chatId,
+      sender:      { $ne: userId },
+      deliveredTo: { $ne: userId }
+    })
+    .select('_id sender deliveredTo')
+    .lean();
+
+    // b) for each, add them to deliveredTo and emit update
+    for (const msg of undelivered) {
+      const updated = await Message.findByIdAndUpdate(
+        msg._id,
+        { $addToSet: { deliveredTo: userId } },
+        { new: true, select: 'sender deliveredTo' }
+      ).lean();
+
+      // c) check if now delivered to all other participants
+      const senderId = updated.sender.toString();
+      const otherIds = participants
+        .map(p => p.toString())
+        .filter(id => id !== senderId);
+      const deliveredToAll = otherIds.every(id =>
+        updated.deliveredTo.map(d => d.toString()).includes(id)
+      );
+
+      // d) emit exactly the same event your client listens for
+      io.to(chatId.toString()).emit('messageDeliveryUpdate', {
+        chatId,
+        messageId:         msg._id.toString(),
+        deliveredToUserId: userId,
+        deliveredToAll
+      });
+    }
+  }
+
+  logger.info(`Online broadcast for ${username}`);
+}
+
+    // Auto-join all chat rooms
+    const userChats = await Chat.find({ participants: userId }).select('_id').lean();
+    userChats.forEach(({ _id }) => socket.join(_id.toString()));
+    logger.info(`User ${username} auto-joined ${userChats.length} rooms`);
+
+    // Package dependencies for event handlers
+    const handlerDependencies = {
+      io,
+      socket,
+      logger,
+      redis,
+      User,
+      Chat,
+      Message,
+      encrypt,
+      decrypt,
+      invalidateChatCache
+    };
+
+    // Register all the handlers
+    initializeChatEventHandlers(handlerDependencies);
+    initializeTypingEventHandlers(handlerDependencies);
+    initializeStatusEventHandlers(handlerDependencies);
+    initializeDisconnectHandlers(handlerDependencies);
+
+    socket.on('error', (error) => {
+      logger.error(`Socket Error for user ${userId} on socket ${socket.id}: ${error.message}`, error);
+    });
+  } catch (error) {
+    logger.error(`Error in connection handler for socket ${socket.id}: ${error.message}`, error);
+  }
+});
 
     logger.info('Socket.IO server initialized and authentication middleware configured.');
     return io;
