@@ -26,15 +26,6 @@ const userSchema = new mongoose.Schema({
     avatar: {
         type: String,
         default: null
-    },
-    onlineStatus: {
-        type: String,
-        enum: ['online', 'offline'], // Enum validation is good at schema level
-        default: 'offline'
-    },
-    lastSeen: {
-        type: Date,
-        default: Date.now
     }
 }, {
     timestamps: true

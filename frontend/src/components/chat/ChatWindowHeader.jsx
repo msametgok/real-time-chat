@@ -5,7 +5,7 @@ import { ChevronLeft } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
 function ChatWindowHeader() {
-  const { activeChat, selectChat } = useChat();
+  const { activeChat, selectChat, presence } = useChat();
   const { user } = useAuth();
 
   const participantInfo = useMemo(() => {
@@ -13,16 +13,21 @@ function ChatWindowHeader() {
     const { isGroupChat, participants = [] } = activeChat;
     if (!isGroupChat && participants.length === 2) {
       const other = participants.find(p => p._id !== user._id);
-      if (other?.onlineStatus === 'online') {
+      
+      const { onlineStatus, lastSeen } = presence[other._id] || {};
+
+      console.log('presence',presence);
+      if (onlineStatus === 'online') {
         return 'Online';
       }
-      if (other?.lastSeen) {
-        return `Last seen ${formatDistanceToNow(new Date(other.lastSeen))} ago`;
+      if (lastSeen) {
+        return `Last seen ${formatDistanceToNow(new Date(lastSeen))} ago`;
       }
-      return 'Offline';
+
+      return 'Offlineeeeeeee';
     }
     return `${participants.length} members`;
-  }, [activeChat, user._id]);
+  }, [activeChat, user._id, presence]);
 
   if (!activeChat) {
     return null;

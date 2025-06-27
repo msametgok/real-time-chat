@@ -4,7 +4,8 @@
   "description": "Real Time Chat Application ",
   "main": "app.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon server"
   },
   "keywords": [
     "real",
@@ -27,7 +28,6 @@
     "mongoose": "^8.12.1",
     "multer": "^1.4.5-lts.1",
     "socket.io": "^4.8.1",
-    "socket.io-client": "^4.8.1",
     "winston": "^3.17.0"
   },
   "devDependencies": {
