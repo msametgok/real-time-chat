@@ -1,19 +1,18 @@
 // Destructure dependencies passed from main socket.js
-module.exports = ({ io, socket, logger, User, Chat, Message, encrypt, decrypt, invalidateChatCache }) => {
+module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, invalidateChatCache }) => {
 
     socket.on('joinChat', async (data) => {
-        const { chatId } = data || {};
-        const userId = socket.user.userId;
-        const username = socket.user.username;
-
-        logger.info(`User ${username} (ID: ${userId}, Socket: ${socket.id}) attempting to join chat: ${chatId}`);
-
-        if (!chatId) {
-            logger.warn(`User ${username} (Socket: ${socket.id}) sent 'joinChat' without a chatId.`);
-            return socket.emit('chatError', { message: 'Chat ID is required to join.' });
-        }
-
         try {
+            const { chatId } = data || {};
+            const userId = socket.user.userId;
+            const username = socket.user.username;
+
+            logger.info(`User ${username} (ID: ${userId}, Socket: ${socket.id}) attempting to join chat: ${chatId}`);
+
+            if (!chatId) {
+                logger.warn(`User ${username} (Socket: ${socket.id}) sent 'joinChat' without a chatId.`);
+                return socket.emit('chatError', { message: 'Chat ID is required to join.' });
+            }
             // Verify chat exists and user is a participant
             const chat = await Chat.findOne({ _id: chatId, participants: userId }).lean();
 
@@ -22,13 +21,13 @@ module.exports = ({ io, socket, logger, User, Chat, Message, encrypt, decrypt, i
                 return socket.emit('chatError', { chatId, message: 'Cannot join this chat. Access denied or chat not found.' });
             }
 
-            // Join the Socket.IO room
+            // Join room
             socket.join(chatId);
-            logger.info(`User ${username} (Socket: ${socket.id}) successfully joined chat room: ${chatId}`);
+            socket.emit('joinedChat', { chatId });
 
-            // Acknowledge successful join
-            socket.emit('joinedChat', { chatId, message: `Successfully joined chat: ${chat.isGroupChat ? chat.chatName : '1-on-1 Chat'}` });
-
+            // Notify others viewing
+            socket.to(chatId).emit('userConnectedToChat', { chatId, userId, username });
+            logger.info(`User ${username} joined chat ${chatId}`);
         } catch (error) {
             logger.error(`Error during 'joinChat' for user ${username} (Socket: ${socket.id}), chat ${chatId}: ${error.message}`, error);
             socket.emit('chatError', { chatId, message: 'Failed to join chat due to a server error.' });
@@ -36,38 +35,25 @@ module.exports = ({ io, socket, logger, User, Chat, Message, encrypt, decrypt, i
     });
 
     socket.on('leaveChat', async (data) => {
-        const { chatId } = data || {};
-        const userId = socket.user.userId;
-        const username = socket.user.username;
-
-        logger.info(`User ${username} (ID: ${userId}, Socket: ${socket.id}) attempting to leave chat: ${chatId}`);
-
-        if (!chatId) {
-            logger.warn(`User ${username} (Socket: ${socket.id}) sent 'leaveChat' without a chatId.`);
-            return socket.emit('chatError', { message: 'Chat ID is required to leave.' });
-        }
-
         try {
-            if (!socket.rooms.has(chatId)) {
-                logger.warn(`User ${username} (Socket: ${socket.id}) attempted to leave chat room ${chatId} they were not in.`);
-                // Still emit success as the desired state (not being in the room) is achieved.
-                return socket.emit('leftChatAck', { chatId, message: `You were not in chat: ${chatId}` });
+            const { chatId } = data || {};
+            const userId = socket.user.userId;
+            const username = socket.user.username;
+
+            logger.info(`User ${username} (ID: ${userId}, Socket: ${socket.id}) attempting to leave chat: ${chatId}`);
+
+            if (!chatId) {
+                logger.warn(`User ${username} (Socket: ${socket.id}) sent 'leaveChat' without a chatId.`);
+                return socket.emit('chatError', { message: 'Chat ID is required to leave.' });
             }
-            
+
+            // Leave room
             socket.leave(chatId);
-            logger.info(`User ${username} (Socket: ${socket.id}) successfully left chat room: ${chatId}`);
+            socket.emit('leftChatAck', { chatId });
 
-            // Acknowledge successful leave
-            socket.emit('leftChatAck', { chatId, message: `Successfully left chat: ${chatId}` });
-
-            // Emit to the room that a user has disconnected from this specific chat view
-            // This informs other users in the room.
-            io.to(chatId).emit('userDisconnectedFromChat', { 
-                chatId, 
-                userId, 
-                username,
-                message: `${username} has left the chat view.`
-            });
+            // Notify others
+            socket.to(chatId).emit('userDisconnectedFromChat', { chatId, userId, username });
+            logger.info(`User ${username} left chat ${chatId}`);
 
         } catch (error) {
             logger.error(`Error during 'leaveChat' for user ${username} (Socket: ${socket.id}), chat ${chatId}: ${error.message}`, error);
@@ -76,106 +62,115 @@ module.exports = ({ io, socket, logger, User, Chat, Message, encrypt, decrypt, i
     });
 
     socket.on('sendMessage', async (data) => {
-        const { chatId, messageType, content, fileUrl, fileName, fileType, fileSize, tempId } = data || {};
-        const userId = socket.user.userId;
-        const username = socket.user.username;
-
-        logger.info(`User ${username} (Socket: ${socket.id}) attempting to send message to chat: ${chatId}`);
-        logger.debug(`sendMessage payload for chat ${chatId}:`, data);
-
-
-        if (!chatId) {
-            logger.warn(`User ${username} (Socket: ${socket.id}) 'sendMessage' without chatId.`);
-            return socket.emit('messageError', { message: 'Chat ID is required to send a message.' });
-        }
-        if (!messageType) {
-            logger.warn(`User ${username} (Socket: ${socket.id}) 'sendMessage' without messageType for chat ${chatId}.`);
-            return socket.emit('messageError', { chatId, message: 'Message type is required.' });
-        }
-
-        // Basic validation based on messageType
-        if (messageType === 'text' && (!content || content.trim() === '')) {
-            logger.warn(`User ${username} (Socket: ${socket.id}) 'sendMessage' with empty text content for chat ${chatId}.`);
-            return socket.emit('messageError', { chatId, message: 'Text message content cannot be empty.' });
-        }
-        if (['image', 'video', 'audio', 'file'].includes(messageType) && !fileUrl) {
-            logger.warn(`User ${username} (Socket: ${socket.id}) 'sendMessage' of type ${messageType} without fileUrl for chat ${chatId}.`);
-            return socket.emit('messageError', { chatId, message: 'File URL is required for file messages.' });
-        }
-
         try {
+            const { chatId, messageType, content, fileUrl, fileName, fileType, fileSize, tempId } = data || {};
+            const userId = socket.user.userId;
+            const username = socket.user.username;
+
+            if (!chatId || !messageType) {
+                logger.warn(`sendMessage missing parameters from ${username}`);
+                return socket.emit('messageError', { message: 'chatId and messageType are required.' });
+            }
+        
             // Verify user is part of the chat
             const chat = await Chat.findOne({ _id: chatId, participants: userId }).lean();
             if (!chat) {
-                logger.warn(`User ${username} (Socket: ${socket.id}) 'sendMessage' to unauthorized/non-existent chat ${chatId}.`);
-                return socket.emit('messageError', { chatId, message: 'Cannot send message to this chat. Access denied or chat not found.' });
+                logger.warn(`Unauthorized sendMessage by ${username} to ${chatId}`);
+                return socket.emit('messageError', { chatId, message: 'Access denied.' });
             }
 
-            let messageToSave = {
+            let msg = {
                 chat: chatId,
                 sender: userId,
-                messageType: messageType,
+                messageType,
                 status: 'sent',
             };
 
             if (messageType === 'text') {
-                messageToSave.content = encrypt(content.trim()); // Encrypt text content
-            } else if (['image', 'video', 'audio', 'file'].includes(messageType)) {
-                messageToSave.fileUrl = fileUrl;
-                if (fileName) messageToSave.fileName = fileName;
-                if (fileType) messageToSave.fileType = fileType;
-                if (fileSize) messageToSave.fileSize = fileSize;
-                if (content && content.trim() !== '') messageToSave.content = encrypt(content.trim()); // Optional: caption for files, also encrypted
-            } else if (['system', 'notification'].includes(messageType)) {
-                messageToSave.content = content;
+                const trimmed = content?.trim() || '';
+                msg.content = encrypt(trimmed);
             } else {
-                logger.warn(`User ${username} (Socket: ${socket.id}) 'sendMessage' with unknown messageType: ${messageType} for chat ${chatId}.`);
-                return socket.emit('messageError', { chatId, message: `Unsupported message type: ${messageType}` });
+                msg.fileUrl = fileUrl;
+                if (fileName) msg.fileName = fileName;
+                if (fileType) msg.fileType = fileType;
+                if (fileSize) msg.fileSize = fileSize;
+                if (content && content.trim()) {
+                msg.content = encrypt(content.trim());
+                }
             }
 
-            const newMessage = new Message(messageToSave);
-            await newMessage.save(); // This will trigger the post-save hook in Message.js
+            const newMessage = await new Message(msg).save(); // This will trigger the post-save hook in Message.js
 
-            let populatedMessage = await Message.findById(newMessage._id)
-                                              .populate('sender', 'username avatar')
-                                              .lean();
+            let populated = await Message.findById(newMessage._id)
+                .populate('sender', 'username avatar').lean();
 
             // Decrypt text content for broadcasting to clients
-            if (populatedMessage.messageType === 'text' && populatedMessage.content) {
+            if (populated.messageType === 'text' && populated.content) {
                 try {
-                    populatedMessage.content = decrypt(populatedMessage.content);
+                    populated.content = decrypt(populated.content);
                 } catch (e) {
-                    logger.error(`Error decrypting message ${populatedMessage._id} for broadcast: ${e.message}`);
+                    logger.error(`Error decrypting message ${populated._id} for broadcast: ${e.message}`);
                     // Decide how to handle: send encrypted, or a placeholder
-                    populatedMessage.content = "[Unable to display message content]";
+                    populated.content = "[Unable to display message content]";
                 }
-            } else if (['image', 'video', 'audio', 'file'].includes(populatedMessage.messageType) && populatedMessage.content) {
+            } else if (['image', 'video', 'audio', 'file'].includes(populated.messageType) && populated.content) {
                 // Decrypt caption if it exists
-                
                 try {
-                    populatedMessage.content = decrypt(populatedMessage.content);
+                    populated.content = decrypt(populated.content);
                 } catch (e) {
-                    logger.error(`Error decrypting caption for message ${populatedMessage._id} for broadcast: ${e.message}`);
-                    populatedMessage.content = null; // Or some placeholder for caption
+                    logger.error(`Error decrypting caption for message ${populated._id} for broadcast: ${e.message}`);
+                    populated.content = null; // Or some placeholder for caption
                 }
             }
 
 
             // Broadcast the new message to everyone in the chat room
-            io.to(chatId).emit('newMessage', populatedMessage);
-            logger.info(`Message ${newMessage._id} (type: ${messageType}) by ${username} sent to chat ${chatId} and broadcasted.`);
+            io.to(chatId).emit('newMessage', populated);
+            io.to(chatId).emit('chatListUpdate', { chatId, latestMessage: populated, timestamp: new Date().toISOString() });
 
             // Acknowledge to the sender that the message was processed
-            socket.emit('messageSentAck', { tempId: tempId, finalMessage: populatedMessage });
+            socket.emit('messageSentAck', { tempId, finalMessage: populated });
+
+            // 3) Emit delivery‐receipt events only for truly online users and update DB
+            for (const participantId of chat.participants.map(p => p.toString())) {
+                if (participantId === userId) continue;
+
+                // “Who’s actually connected right now?”
+                const sockets = await io.in(`user-${participantId}`).allSockets();
+                if (sockets.size > 0) {
+                    // Atomically add this user to deliveredTo if not already present
+                    const updatedMsg = await Message.findOneAndUpdate(
+                        { _id: populated._id, deliveredTo: { $ne: participantId } },
+                        { $addToSet: { deliveredTo: participantId } },
+                        { new: true, select: 'sender deliveredTo' }
+                    ).lean();
+
+                    // Compute whether *all* other participants have now received it
+                    const senderId = updatedMsg.sender.toString();
+                    const otherIds = chat.participants
+                    .map(p => p.toString())
+                    .filter(id => id !== senderId);
+                    const deliveredToAll = otherIds.every(id =>
+                    updatedMsg.deliveredTo.map(d => d.toString()).includes(id)
+                    );
+
+                    // Broadcast exactly the same update your React client expects
+                    io.to(chatId).emit('messageDeliveryUpdate', {
+                        chatId,
+                        messageId: populated._id.toString(),
+                        deliveredToUserId: participantId,
+                        deliveredToAll
+                    });
+                }
+            }
 
             // Invalidate chat cache for all participants since latestMessage/order changed
-            if (chat.participants) {
-                await invalidateChatCache(chat.participants.map(p => p.toString()));
-            }
+            await invalidateChatCache(chat.participants);
+            logger.info(`Message ${newMessage._id} by ${username} in chat ${chatId}`);
 
         } catch (error) {
             logger.error(`Error during 'sendMessage' for user ${username} (Socket: ${socket.id}), chat ${chatId}: ${error.message}`, error);
-            socket.emit('messageError', { chatId, message: 'Failed to send message due to a server error.' });
+            socket.emit('messageError', { message: 'Failed to send message.' });
         }
     });
 };
