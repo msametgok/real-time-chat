@@ -24,7 +24,7 @@ function ChatWindowHeader() {
         return `Last seen ${formatDistanceToNow(new Date(lastSeen))} ago`;
       }
 
-      return 'Offlineeeeeeee';
+      return 'Offline';
     }
     return `${participants.length} members`;
   }, [activeChat, user._id, presence]);
