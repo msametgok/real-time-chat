@@ -60,6 +60,15 @@ const api = {
         return this.request('/api/auth/login', 'POST', { email, password });
     },
 
+    /** 
+     * Log out a user
+     * @param {String} token - JWT token
+     * @returns {Promise<Object>} - {message}
+    */
+    async logout(data = {}) {
+        return this.request('/api/auth/logout', 'POST', data, null);
+    },
+
     /**
      * Register a new user
      * @param {String} username - User's username
