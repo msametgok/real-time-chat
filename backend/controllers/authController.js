@@ -96,3 +96,16 @@ exports.login = [
     }
   },
 ];
+
+// Logout endpoint
+exports.logout = async (req, res) => {
+  try {
+    // If you were using http-only cookies, you could clear them like:
+    //    res.clearCookie('token');
+    // With stateless JWTs, simply returning success is sufficient;
+    // front-end will discard its copy of the token.
+    return res.status(200).json({ message: "User logged out successfully." });
+  } catch (error) {
+    return res.status(500).json({ message: "Server error" });
+  }
+};
