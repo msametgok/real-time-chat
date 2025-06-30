@@ -4,6 +4,7 @@ import { useChat } from '../hooks/useChat';
 import { useAuth } from '../hooks/useAuth';
 import ChatList from '../components/chat/ChatList';
 import ChatWindow from '../components/chat/ChatWindow';
+import UserProfileCard from '../components/user/UserProfileCard';
 
 // Wraps chat list and window panels inside ChatProvider
 function ChatPage() {
@@ -48,10 +49,9 @@ function ChatAppContent() {
         </div>
 
         {/* User Profile Card */}
-        <div className="flex flex-col items-center bg-slate-700 border border-slate-600 mt-4 w-full max-w-xs mx-auto py-6 px-4 rounded-lg">
-          <div className="h-20 w-20 rounded-full border overflow-hidden bg-slate-500" />
-          <div className="text-sm font-semibold mt-2 text-white">{user.username}</div>
-          <div className="text-xs text-slate-400">{me.onlineStatus === 'online' ? 'Online' : 'Offline'}</div>
+        <div className="mt-4">
+          <UserProfileCard />
+          {console.log(`presence ${me.onlineStatus}`)}
         </div>
 
         <ChatList />
