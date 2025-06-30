@@ -120,14 +120,16 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => {
     setAuthError(null);
-    api.clearToken();
-    // ChatContext will also disconnect; safe to call here too
+    // Notify server (optional)
+    api.logout({}).catch(() => {});
+    // Disconnect sockets
     socketService.disconnect();
-    localStorage.removeItem("user");
-    localStorage.removeItem("token");
+    // Clear client storage
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
     setUser(null);
     setIsAuthenticated(false);
-    navigate("/login", { replace: true });
+    navigate('/login', { replace: true });
   }, [navigate]);
 
   // React to changes in other tabs
