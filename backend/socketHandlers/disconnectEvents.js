@@ -41,7 +41,7 @@ module.exports = ({ io, socket, logger, redis, Chat }) => {
           });
         });
         logger.info(`User ${username} is now offline in ${rooms.length} chats.`);
-      }(`User ${username} is now offline in ${rooms.length} chats.`);
+      }
       
     } catch (err) {
       logger.error(`Error in disconnect handler for socket ${socket.id}: ${err.message}`, err);
