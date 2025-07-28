@@ -21,6 +21,29 @@ if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
+const rateLimit = require('express-rate-limit');
+
+// Limit login/register to 5 requests per minute per IP
+const authLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5,
+  message: { message: 'Too many authentication attempts, please try again later.' }
+});
+
+// Limit all API endpoints to 100 requests per minute per IP
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute,
+  max: 100,
+  message: { message: 'Too many requests, please try again later.' }
+})
+
+// Apply auth rate limiter to login/register endpoints
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/register', authLimiter);
+
+// Apply general rate limiter to all API routes under /api
+app.use('/api', apiLimiter);
+
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/chat', chatRoutes);
