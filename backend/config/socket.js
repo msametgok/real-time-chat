@@ -35,6 +35,12 @@ const initializeSocket = async (server) => {
   const pubClient = redis.duplicate();
   const subClient = redis.duplicate();
 
+  pubClient.on('connect', () => logger.info('pubClient connected to Redis'));
+  pubClient.on('error', err => logger.error(`Redis pubClient error: ${err.message}`, err));
+
+  subClient.on('connect', () => logger.info('subClient connected to Redis'));
+  subClient.on('error', err => logger.error(`Redis subClient error: ${err.message}`, err));
+
   // Tell Socket.IO to use the Redis adapter
   io.adapter(createAdapter(pubClient, subClient));
 
