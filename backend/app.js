@@ -1,4 +1,5 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -20,8 +21,6 @@ app.use(cors({
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
-
-const rateLimit = require('express-rate-limit');
 
 // Limit login/register to 5 requests per minute per IP
 const authLimiter = rateLimit({
