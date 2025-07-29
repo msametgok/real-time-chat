@@ -29,7 +29,7 @@ async function startServer() {
     await connectDB();
     logger.info('MongoDB connected successfully for server startup.');
 
-    io = initializeSocket(server);
+    io = await initializeSocket(server);
 
     app.get('/health', (req, res) => {
       res.status(200).json({ status: 'OK', uptime: process.uptime() });

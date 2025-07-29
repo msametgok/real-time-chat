@@ -1,5 +1,6 @@
 // backend/config/socket.js
 const socketIo = require('socket.io');
+const { createAdapter } = require('@socket.io/redis-adapter');
 const jwt = require('jsonwebtoken');
 const logger = require('./logger');
 const redis = require('./redis');
@@ -25,10 +26,17 @@ const invalidateChatCache = async (userIds) => {
   }
 };
 
-const initializeSocket = (server) => {
+const initializeSocket = async (server) => {
   const io = socketIo(server, {
     cors: { origin: process.env.CLIENT_URL, methods: ['GET','POST'], credentials: true }
   });
+
+  // Duplicate existing Redis client pub/sub
+  const pubClient = redis.duplicate();
+  const subClient = redis.duplicate();
+
+  // Tell Socket.IO to use the Redis adapter
+  io.adapter(createAdapter(pubClient, subClient));
 
   // Authentication middleware
   io.use(async (socket, next) => {
