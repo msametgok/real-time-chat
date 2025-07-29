@@ -22,6 +22,10 @@ if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
+app.get('/health', (req, res) => {
+      res.status(200).json({ status: 'OK', uptime: process.uptime() });
+});
+
 // Limit login/register to 5 requests per minute per IP
 const authLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute

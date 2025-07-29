@@ -31,10 +31,6 @@ async function startServer() {
 
     io = await initializeSocket(server);
 
-    app.get('/health', (req, res) => {
-      res.status(200).json({ status: 'OK', uptime: process.uptime() });
-    });
-
     server.listen(PORT, () => {
       logger.info(`Server is running on PORT:${PORT}`);
     });
