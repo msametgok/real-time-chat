@@ -142,7 +142,10 @@ const initializeSocket = async (server) => {
         logger.info(`User ${username} is now online in ${rooms.length} chats`);
       }
 
-      // 5) Register event handlers
+      // 5. Sync missed delivery ticks for reconnecting user
+      await syncMissedDeliveryEvents(socket, userId, rooms.map(r => r._id));
+
+      // 6) Register event handlers
       const deps = { io, socket, logger, redis, User, Chat, Message, encrypt, decrypt, invalidateChatCache };
       initializeChatEventHandlers(deps);
       initializeTypingEventHandlers(deps);
@@ -158,5 +161,35 @@ const initializeSocket = async (server) => {
   logger.info('Socket.IO server initialized.');
   return io;
 };
+
+const syncMissedDeliveryEvents = async (socket, userId, chatIds) => {
+  try {
+    // Placeholder: In the future, track undelivered UI updates using Redis or DB flags
+    for (const chatId of chatIds) {
+      const messages = await Message.find({
+        chat: chatId,
+        deliveredTo: userId,
+        sender: { $ne: userId }
+      }).select('_id deliveredTo sender').lean();
+
+      for (const msg of messages) {
+        const chat = await Chat.findById(chatId).select('participants').lean();
+        const senderId = msg.sender.toString();
+        const otherIds = chat.participants.map(p => p.toString()).filter(id => id !== senderId);
+        const deliveredToAll = otherIds.every(id => msg.deliveredTo.map(d => d.toString()).includes(id));
+
+        socket.emit('messageDeliveryUpdate', {
+          chatId,
+          messageId: msg._id.toString(),
+          deliveredToUserId: userId,
+          deliveredToAll
+        });
+      }
+    }
+  } catch (err) {
+    logger.error(`Error in delivery sync for user ${userId}: ${err.message}`, err);
+  }
+};
+
 
 module.exports = initializeSocket;
