@@ -145,7 +145,10 @@ const initializeSocket = async (server) => {
       // 5. Sync missed delivery ticks for reconnecting user
       await syncMissedDeliveryEvents(socket, userId, rooms.map(r => r._id));
 
-      // 6) Register event handlers
+      // 6. NEW: Sync missed read‐receipt events for reconnecting user
+      await syncMissedReadReceipts(socket, userId, rooms.map(r => r._id));
+
+      // 7) Register event handlers
       const deps = { io, socket, logger, redis, User, Chat, Message, encrypt, decrypt, invalidateChatCache };
       initializeChatEventHandlers(deps);
       initializeTypingEventHandlers(deps);
@@ -191,5 +194,39 @@ const syncMissedDeliveryEvents = async (socket, userId, chatIds) => {
   }
 };
 
+/**
+ * Sync any read receipts this user may have missed while disconnected.
+ */
+const syncMissedReadReceipts = async (socket, userId, chatIds) => {
+  try {
+    for (const chatId of chatIds) {
+      // Find messages in this chat that *this* user has marked as read in DB
+      const msgs = await Message.find({
+        chat: chatId,
+        readBy: userId,
+        sender: { $ne: userId }
+      }).select('_id readBy sender').lean();
+
+      // For each, recompute whether it's now read-by-all
+      const chat = await Chat.findById(chatId).select('participants').lean();
+      const participantIds = chat.participants.map(p => p.toString());
+
+      for (const msg of msgs) {
+        // Which other participants beyond sender
+        const otherIds = participantIds.filter(id => id !== msg.sender.toString());
+        const readByAll = otherIds.every(id => msg.readBy.map(d => d.toString()).includes(id));
+
+        socket.emit('messagesReadUpdate', {
+          chatId,
+          reader: { userId, username: socket.user.username },
+          messageIds: [msg._id.toString()],
+          messagesReadByAll: readByAll ? [msg._id.toString()] : []
+        });
+      }
+    }
+  } catch (err) {
+    logger.error(`Error in read‐receipt sync for user ${userId}: ${err.message}`, err);
+  }
+};
 
 module.exports = initializeSocket;
