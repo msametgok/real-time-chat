@@ -104,8 +104,11 @@ module.exports = ({ io, socket, logger, Chat, Message }) => {
         { new: true, select: 'sender deliveredTo' }
       ).lean();
 
-      // If no update, either message doesn't exist or user already marked delivered
-      if (!updatedMsg) return;
+      // Check if Redis already marked this delivery event
+      const deliveryKey = `delivery:${messageId}:${userId}`;
+      const alreadyHandled = await redis.set(deliveryKey, '1', 'NX', 'EX', 30); // 30s TTL
+
+      if (!updatedMsg || !alreadyHandled) return; // skip duplicate
 
       // 2) Check if *all* other participants have now delivered it
       const chat = await Chat.findById(chatId).select('participants').lean();
