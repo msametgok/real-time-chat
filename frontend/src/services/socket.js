@@ -115,7 +115,7 @@ class SocketService {
 
   // ——— Listener registration ———
   _registerListener(event, cb) {
-    if (this.eventCallbacks.hasOwnProperty(event)) {
+    if (Object.prototype.hasOwnProperty.call(this.eventCallbacks, event)) {
       this.eventCallbacks[event] = cb;
     } else {
       console.warn(`Unknown socket event: ${event}`);
