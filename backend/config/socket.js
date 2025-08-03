@@ -73,9 +73,7 @@ const initializeSocket = async (server) => {
       logger.debug(`Presence pruning: user ${userId} has ${openCount} live sockets`);
 
       // 2) Auto-join all chat rooms
-      const rooms = await Chat.find({ participants: userId })
-                               .select('_id participants')
-                               .lean();
+      const rooms = await Chat.find({ participants: userId }).select('_id participants').lean();
       rooms.forEach(({ _id }) => socket.join(_id.toString()));
 
       // 3) Initial presence sync for each other participant
