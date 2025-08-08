@@ -104,7 +104,6 @@ function ChatList() {
   return (
     <div className="flex flex-col mt-8 flex-grow overflow-y-auto pr-2 -mr-2 custom-scrollbar">
       <div className="flex flex-col space-y-1 ">
-        {console.log(chats)}
         {chats.length === 0 && !isLoadingChats && (
           <p className="text-slate-400 italic text-center p-4">No chats yet. Start a new conversation!</p>
         )}
