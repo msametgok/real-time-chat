@@ -123,10 +123,20 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, 
                 }
             }
 
+            console.log('ALOOOOOOOOOOOOOOOOOOOO');
 
-            // Broadcast the new message to everyone in the chat room
             io.to(chatId).emit('newMessage', populated);
-            io.to(chatId).emit('chatListUpdate', { chatId, latestMessage: populated, timestamp: new Date().toISOString() });
+            const chatListPayload = {
+                chatId,
+                latestMessage: populated,
+                timestamp: new Date().toISOString()
+            };
+            // room for the conversation (so active chat user sees it immediately)
+            io.to(chatId).emit('chatListUpdate', chatListPayload);
+            // and each user's personal room (so sidebar users get it)
+            chat.participants.forEach(pid => {
+                io.to(`user-${pid}`).emit('chatListUpdate', chatListPayload);
+            });
 
             // Acknowledge to the sender that the message was processed
             socket.emit('messageSentAck', { tempId, finalMessage: populated });

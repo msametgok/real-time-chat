@@ -15,8 +15,7 @@ const TypingIndicator = () => {
     const currentlyTyping = useMemo(() =>
         Object.entries(typingUsers)
             .filter(([userId, typingUser]) => typingUser && userId !== user?._id)
-            // FIX: Access the 'username' property from the second element (the value)
-            .map(([userId, typingUser]) => typingUser.username), 
+            .map(([, typingUser]) => typingUser.username),
         [typingUsers, user?._id]
     );
 

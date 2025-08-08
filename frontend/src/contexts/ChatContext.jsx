@@ -5,6 +5,7 @@ import React, {
   useState,
   useEffect,
   useCallback,
+  useRef
 } from "react";
 import { useAuth } from "../hooks/useAuth";
 import api from "../services/api";
@@ -386,18 +387,29 @@ const handleMessageDeliveryUpdate = useCallback(
   }, [isAuthenticated, user?.token, hasConnected]);
 
   // ─── 6.5) JOIN ALL CHATS ON CONNECT ───
-  useEffect(() => {
-    if (!hasConnected || chats.length === 0) return;
+  const joinedChatsRef = useRef(new Set());
 
-    chats.forEach(c => {
-      socketService.joinChat(c._id);
+  useEffect(() => {
+    if (!hasConnected) return;
+
+    const currentChatIds = new Set(chats.map(c => c._id));
+    const joinedChats = joinedChatsRef.current;
+
+    // Join newly added chats
+    currentChatIds.forEach(id => {
+      if (!joinedChats.has(id)) {
+        socketService.joinChat(id);
+        joinedChats.add(id);
+      }
     });
 
-    return () => {
-      chats.forEach(c => {
-        socketService.leaveChat(c._id);
-      });
-    };
+    // Leave chats that were removed
+    joinedChats.forEach(id => {
+      if (!currentChatIds.has(id)) {
+        socketService.leaveChat(id);
+        joinedChats.delete(id);
+      }
+    });
   }, [hasConnected, chats]);
 
   // ─── 7) CATCH-UP: latestMessage in every chat ───
