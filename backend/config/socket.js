@@ -14,17 +14,7 @@ const initializeChatEventHandlers = require('../socketHandlers/chatEvents');
 const initializeTypingEventHandlers = require('../socketHandlers/typingEvents');
 const initializeStatusEventHandlers = require('../socketHandlers/statusEvents');
 const initializeDisconnectHandlers = require('../socketHandlers/disconnectEvents');
-
-const invalidateChatCache = async (userIds) => {
-  if (!Array.isArray(userIds)) userIds = [userIds].filter(Boolean);
-  if (userIds.length === 0) return;
-  try {
-    await Promise.all(userIds.map(id => redis.del(`user:${id}:chats`)));
-    logger.info(`Cache invalidated for users: ${userIds.join(', ')}`);
-  } catch (error) {
-    logger.error(`Error invalidating chat cache for users ${userIds.join(', ')}: ${error.message}`, error);
-  }
-};
+const { invalidateChatCache } = require('../utils/chatCache');
 
 const initializeSocket = async (server) => {
   const io = socketIo(server, {

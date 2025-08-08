@@ -6,26 +6,7 @@ const User = require('../models/User');
 const redis = require('../config/redis');
 const logger = require('../config/logger');
 const { decrypt } = require('../utils/encryption');
-
-// Helper function to invalidate cache
-const invalidateChatCache = async (userIds) => {
-    if (!Array.isArray(userIds)) {
-        userIds = [userIds];
-    }
-    try {
-        const promises = userIds.map(id => {
-            if (id) {
-                const cacheKey = `user:${id.toString()}:chats`;
-                return redis.del(cacheKey);
-            }
-            return Promise.resolve();
-        });
-        await Promise.all(promises);
-        logger.info(`Chat cache invalidated for users: ${userIds.filter(id => id).join(', ')}`);
-    } catch (error) {
-        logger.error(`Error invalidating cache for user: ${userIds.filter(id => id).join(', ')}: ${error.message}`, error);
-    }
-}
+const { invalidateChatCache } = require('../utils/chatCache');
 
 const formatChatResponse = (chat, currentUserId) => {
     if (!chat) return null;
