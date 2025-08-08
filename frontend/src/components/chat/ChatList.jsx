@@ -111,7 +111,7 @@ function ChatList() {
           <ChatListItem
             key={chat._id}
             chat={chat}
-            currentUserId={user?.id} // Pass current user's ID safely
+            currentUserId={user?._id} // Pass current user's ID safely
             isActive={activeChat?._id === chat._id}
             onSelectChat={selectChat}
           />
