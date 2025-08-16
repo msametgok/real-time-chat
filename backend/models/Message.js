@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const logger = require('../config/logger');
+const { invalidateChatCache } = require('../utils/chatCache');
 
 const messageSchema = new mongoose.Schema({
     chat: {
@@ -63,10 +64,17 @@ messageSchema.index({ chat: 1, createdAt: -1 });
 
 messageSchema.post('save', async function(doc, next) {
     try {
-        await mongoose.model('Chat').findByIdAndUpdate(doc.chat, { 
-            latestMessage: doc._id,
-            updatedAt: Date.now()
-        });
+        const Chat = mongoose.model('Chat');
+        const chat = await Chat.findByIdAndUpdate(
+            doc.chat,
+            { latestMessage: doc._id, updatedAt: Date.now() },
+            { new: true }
+        ).select('participants');
+
+        if (chat && Array.isArray(chat.participants)) {
+            const participantIds = chat.participants.map(id => id.toString());
+            await invalidateChatCache(participantIds);
+        }
         next();
     } catch (error) {
         logger.error(`Error updating latestMessage in Chat from Message post-save hook for message ${doc._id}: ${error.message}`, error);
