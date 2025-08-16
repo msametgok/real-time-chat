@@ -7,8 +7,6 @@ export function useSocket(chatId) {
     const [isConnected, setIsConnected] = useState(false);
     const [newMessage, setNewMessage] = useState(null);
     const [typingUser, setTypingUser] = useState(null);
-    const [readMessages, setReadMessages] = useState(null);
-    const [messageStatus, setMessageStatus] = useState(null);
 
     // Connect to Socket.io and join chat when user is authenticated
     useEffect(() => {
@@ -63,16 +61,6 @@ export function useSocket(chatId) {
             }
         })
 
-        socketService.onMessagesRead((data) => {
-            console.log('Messages read:', data);
-            setReadMessages(data);
-        })
-
-        socketService.onMessageStatus((data) => {
-            console.log('Message status:', data);
-            setMessageStatus(data);
-        })
-
         return () => {
             socketService.onNewMessage(null);
             socketService.onTyping(null);
@@ -122,8 +110,6 @@ export function useSocket(chatId) {
         isConnected,
         newMessage,
         typingUser,
-        readMessages,
-        messageStatus,
         sendMessage,
         markMessagesRead,
         typingStart,
