@@ -412,6 +412,28 @@ const handleMessageDeliveryUpdate = useCallback(
     });
   }, [hasConnected, chats]);
 
+
+  // ─── 6.6) ALWAYS RE-JOIN ROOMS AFTER (RE)CONNECT ───
+  // On refresh or network hiccup, the server drops all room memberships for the new socket.id.
+  // Our joinedChatsRef still says "we're joined", so 6.5 won't re-emit. Do it explicitly here.
+  useEffect(() => {
+    if (!hasConnected) return;
+    const sock = socketService.getSocket();
+    if (!sock) return;
+
+    const handleConnect = () => {
+      console.log("🔌 (Re)connected → rejoining all chats so sidebar updates keep working");
+      // Re-join every chat regardless of joinedChatsRef; server will ignore duplicates.
+      chats.forEach(c => socketService.joinChat(c._id));
+      // Keep the local cache in sync with what we just joined.
+      joinedChatsRef.current = new Set(chats.map(c => c._id));
+    };
+
+    sock.on('connect', handleConnect);
+    return () => sock.off('connect', handleConnect);
+  }, [hasConnected, chats]);
+
+
   // ─── 7) CATCH-UP: latestMessage in every chat ───
   useEffect(() => {
     if (!hasConnected) return;
