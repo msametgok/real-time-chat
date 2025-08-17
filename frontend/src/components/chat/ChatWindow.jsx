@@ -53,7 +53,7 @@ function ChatWindow() {
 
         // Find all messages in the active chat that were sent by others and that the current user hasn't read yet
         const unreadMessages = messages.filter(msg =>
-            msg.sender?.id !== user._id && !msg.readBy?.includes(user._id)
+            msg.sender?._id !== user._id && !msg.readBy?.includes(user._id)
         );
 
         if (unreadMessages.length > 0) {
