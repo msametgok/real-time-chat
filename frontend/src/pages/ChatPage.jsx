@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChatProvider } from '../contexts/ChatContext';
+//import { ChatProvider } from '../contexts/ChatContext';
 import { useChat } from '../hooks/useChat';
 import { useAuth } from '../hooks/useAuth';
 import ChatList from '../components/chat/ChatList';
@@ -9,9 +9,7 @@ import UserProfileCard from '../components/user/UserProfileCard';
 // Wraps chat list and window panels inside ChatProvider
 function ChatPage() {
   return (
-    <ChatProvider>
       <ChatAppContent />
-    </ChatProvider>
   );
 }
 
