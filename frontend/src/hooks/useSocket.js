@@ -64,8 +64,6 @@ export function useSocket(chatId) {
         return () => {
             socketService.onNewMessage(null);
             socketService.onTyping(null);
-            socketService.onMessagesRead(null);
-            socketService.onMessageStatus(null);
         }
     }, [isConnected]);
 
