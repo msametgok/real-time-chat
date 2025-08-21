@@ -92,7 +92,7 @@ export function ChatProvider({ children }) {
           c.latestMessage?.createdAt || c.updatedAt || new Date().toISOString(),
         unreadCount: c.unreadCount || 0
       }));
-      setChats(normalized);
+      setChats(normalized.sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
     } catch (err) {
       console.error("ChatContext: fetchChats error", err);
       setChatError(err.message || "Failed to load chats");
@@ -511,6 +511,26 @@ const handleMessageDeliveryUpdate = useCallback(
     [isAuthenticated, user?.token, fetchChats, selectChat]
   );
 
+
+  // ─── 10) Socket actions exposed to UI ───
+  const sendMessage = useCallback((messageData) => {
+    // messageData: { chatId, messageType, content, tempId }
+    socketService.sendMessage(messageData);
+  }, []);
+
+  const typingStart = useCallback((chatId) => {
+    socketService.typingStart(chatId);
+  }, []);
+
+  const typingStop = useCallback((chatId) => {
+    socketService.typingStop(chatId);
+  }, []);
+
+  const markMessagesAsRead = useCallback((chatId, messageIds) => {
+    socketService.markMessagesAsRead(chatId, messageIds);
+  }, []);
+
+
   const contextValue = {
     chats,
     activeChat,
@@ -526,7 +546,11 @@ const handleMessageDeliveryUpdate = useCallback(
     createOneOnOneChatAPI,
     createGroupChatAPI,
     hasConnected,
-    presence
+    presence,
+    sendMessage,
+    typingStart,
+    typingStop,
+    markMessagesAsRead
   };
 
   return (
