@@ -61,7 +61,7 @@ function ChatWindow() {
             console.log(`Emitting markMessagesAsRead for ${unreadMessageIds.length} messages...`);
             markMessagesAsRead(activeChat._id, unreadMessageIds);
         }
-    }, [messages, activeChat, user]);
+    }, [messages, activeChat, user, markMessagesAsRead]);
 
     const handleSendMessage = (messageContent) => {
         if (!activeChat) return;
