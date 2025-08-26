@@ -161,43 +161,121 @@ export function ChatProvider({ children }) {
     [activeChat?._id, chats, fetchMessages]
   );
 
-  // ─── 4) REAL-TIME HANDLERS ───
+  const sendMessage = useCallback((messageData) => {
+    // messageData: { chatId, messageType, content, tempId }
+    const chatId = messageData?.chatId;
+    const content = messageData?.content;
+    const messageType = messageData?.messageType || 'text';
+    const tempId = messageData?.tempId || `temp_${Date.now()}`;
 
-  // New message arrives
+    if (!isAuthenticated || !user?._id || !chatId || !content?.trim()) return;
+
+    const optimistic = {
+      _id: tempId,
+      chat: chatId,
+      sender : { _id: user._id, username: user.username},
+      content,
+      messageType,
+      createdAt: new Date().toISOString(),
+      deliveredTo: [],
+      readBy: [user._id]
+    }
+
+    // optimistic push in the open chat
+    if (activeChat?._id === chatId) {
+      setMessages(prev => [...prev, optimistic]);
+    }
+
+    // optimistic sidebar preview + reorder
+    setChats(prev =>
+      prev
+      .map(c => (c._id === chatId
+        ? {...c, latestMessage: optimistic, updatedAt: optimistic.createdAt}
+        : c))
+      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+      
+    );
+
+    // actual emit
+    socketService.sendMessage({ chatId, messageType, content, tempId});
+  }, [isAuthenticated, user?._id, user?.username, activeChat?._id]);
+
+  const typingStart = useCallback((chatId) => {
+    if (!chatId) return;
+    socketService.typingStart(chatId);
+  }, []);
+
+  const typingStop = useCallback((chatId) => {
+    if (!chatId) return;
+    socketService.typingStop(chatId);
+  }, []);
+
+  const markMessagesAsRead = useCallback((chatId, messageIds) => {
+    if (!chatId || !Array.isArray(messageIds) || messageIds.length === 0) return;
+    socketService.markMessagesAsRead(chatId, messageIds);
+  }, []);
+
+  // ─── 4) REAL-TIME HANDLERS ───
+ // New message arrives
   const handleNewMessage = useCallback(
-    newMessage => {
-      if (isAuthenticated && user?._id !== newMessage.sender?._id && !newMessage.deliveredTo?.includes(user._id)) {
-        socketService.messageDeliveredToClient(
-          newMessage._id,
-          newMessage.chat
-        );
+    (newMessage) => {
+      const fromMe = newMessage.sender?._id?.toString() === user?._id?.toString();
+
+      // If it's from someone else, immediately send delivery receipt if needed
+      if (
+        isAuthenticated &&
+        !fromMe &&
+        !newMessage.deliveredTo?.some((id) => id.toString() === user?._id?.toString())
+      ) {
+        socketService.messageDeliveredToClient(newMessage._id, newMessage.chat);
       }
+
       if (newMessage.chat === activeChat?._id) {
-        setMessages(prev => {
-          // If it was already added via optimistic render (tempId), replace it
-          const tempIndex = prev.findIndex(m => m._id === newMessage.tempId);
-          if (tempIndex !== -1) {
-            const updated = [...prev];
-            updated[tempIndex] = newMessage;
-            return updated;
+        setMessages((prev) => {
+          // 1) If server included tempId, replace by tempId (fast path)
+          if (newMessage.tempId) {
+            const idx = prev.findIndex((m) => m._id === newMessage.tempId);
+            if (idx !== -1) {
+              const copy = [...prev];
+              copy[idx] = newMessage;
+              return copy;
+            }
           }
 
-          // Else: normal append if not duplicate
-          const exists = prev.some(m => m._id === newMessage._id);
+          // 2) Fallback: if message is mine, replace the most recent optimistic temp_* with same content
+          // (covers the case where server doesn't send tempId but echoes newMessage to sender)
+          if (fromMe) {
+            // search from end for the freshest optimistic bubble
+            for (let i = prev.length - 1; i >= 0; i--) {
+              const m = prev[i];
+              const isTemp = typeof m._id === 'string' && m._id.startsWith('temp_');
+              const isMine = m.sender?._id?.toString() === user?._id?.toString();
+              if (isTemp && isMine && m.content === newMessage.content) {
+                const copy = [...prev];
+                copy[i] = newMessage;
+                return copy;
+              }
+            }
+          }
+
+          // 3) Otherwise: append only if we don't already have the real one
+          const exists = prev.some((m) => m._id === newMessage._id);
           if (exists) return prev;
           return [...prev, newMessage];
         });
-    }
-      setChats(prev =>
+      }
+
+      // Update sidebar preview / unread counters
+      setChats((prev) =>
         prev
-          .map(c => {
+          .map((c) => {
             if (c._id === newMessage.chat) {
               const isActive = c._id === activeChat?._id;
               return {
                 ...c,
                 latestMessage: newMessage,
                 updatedAt: newMessage.createdAt,
-                unreadCount: isActive ? 0 : (c.unreadCount || 0) + 1
+                unreadCount: isActive ? 0 : (c.unreadCount || 0) + 1,
               };
             }
             return c;
@@ -205,7 +283,7 @@ export function ChatProvider({ children }) {
           .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
       );
     },
-    [activeChat?._id, user?._id]
+    [activeChat?._id, user?._id, isAuthenticated]
   );
 
   // Typing indicators
@@ -338,6 +416,25 @@ const handleMessageDeliveryUpdate = useCallback(
     [activeChat, messages, user?._id]
   );
 
+  // Server confirms a message we sent (replace optimistic temp message)
+  const handleMessageSentAck = useCallback(({ tempId, message }) => {
+    if (!tempId || !message) return;
+    setMessages(prev => {
+      const i = prev.findIndex(m => m._id === tempId);
+      if (i === -1) return prev;
+      const copy = [...prev];
+      copy[i] = message;
+      return copy;
+    });
+    setChats(prev =>
+      prev
+        .map(c => (c._id === message.chat
+          ? { ...c, latestMessage: message, updatedAt: message.createdAt }
+          : c))
+        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+    );
+  }, []);
+
   // ─── 5) REGISTER HANDLERS ───
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -348,6 +445,7 @@ const handleMessageDeliveryUpdate = useCallback(
     socketService.onMessageDeliveryUpdate(handleMessageDeliveryUpdate);
     socketService.onChatListUpdate(handleChatListUpdate);
     socketService.onUserConnectedToChat(handleUserConnectedToChat);
+    socketService.onMessageSentAck(handleMessageSentAck);
 
     return () => {
       socketService.offNewMessage(handleNewMessage);
@@ -356,6 +454,7 @@ const handleMessageDeliveryUpdate = useCallback(
       socketService.offMessageDeliveryUpdate(handleMessageDeliveryUpdate);
       socketService.offChatListUpdate(handleChatListUpdate);
       socketService.offUserConnectedToChat(handleUserConnectedToChat);
+      socketService.offMessageSentAck(handleMessageSentAck);
     };
   }, [
     isAuthenticated,
@@ -365,6 +464,7 @@ const handleMessageDeliveryUpdate = useCallback(
     handleMessageDeliveryUpdate,
     handleChatListUpdate,
     handleUserConnectedToChat,
+    handleMessageSentAck
   ]);
 
   // ─── 6) CONNECT/DISCONNECT SOCKET ───
@@ -510,26 +610,6 @@ const handleMessageDeliveryUpdate = useCallback(
     },
     [isAuthenticated, user?.token, fetchChats, selectChat]
   );
-
-
-  // ─── 10) Socket actions exposed to UI ───
-  const sendMessage = useCallback((messageData) => {
-    // messageData: { chatId, messageType, content, tempId }
-    socketService.sendMessage(messageData);
-  }, []);
-
-  const typingStart = useCallback((chatId) => {
-    socketService.typingStart(chatId);
-  }, []);
-
-  const typingStop = useCallback((chatId) => {
-    socketService.typingStop(chatId);
-  }, []);
-
-  const markMessagesAsRead = useCallback((chatId, messageIds) => {
-    socketService.markMessagesAsRead(chatId, messageIds);
-  }, []);
-
 
   const contextValue = {
     chats,
