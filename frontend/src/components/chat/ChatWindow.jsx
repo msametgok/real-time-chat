@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo } from "react";
 import { useChat } from '../../hooks/useChat';
 import { useAuth } from '../../hooks/useAuth';
-import socketService from '../../services/socket'
 import ChatWindowHeader from "./ChatWindowHeader";
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
@@ -42,7 +41,7 @@ const TypingIndicator = () => {
 };
 
 function ChatWindow() {
-    const { activeChat, messages } = useChat();
+    const { activeChat, messages, sendMessage, typingStart, typingStop, markMessagesAsRead } = useChat();
     const { user } = useAuth();
 
     useEffect(() => {
@@ -60,20 +59,8 @@ function ChatWindow() {
             // FIX: Map the array of message objects to an array of message IDs
             const unreadMessageIds = unreadMessages.map(msg => msg._id);
             console.log(`Emitting markMessagesAsRead for ${unreadMessageIds.length} messages...`);
-            socketService.markMessagesAsRead(activeChat._id, unreadMessageIds);
+            markMessagesAsRead(activeChat._id, unreadMessageIds);
         }
-    }, [messages, activeChat, user]);
-
-    useEffect(() => {
-        if (!activeChat || !user || messages.length === 0) return;
-
-        // For every undelivered message, emit a delivery receipt
-        messages.forEach(m => {
-            const already = (m.deliveredTo || []).map(d => d.toString());
-            if (m.sender?._id !== user._id && !already.includes(user._id)) {
-                socketService.messageDeliveredToClient(m._id, activeChat._id);
-            }
-        });
     }, [messages, activeChat, user]);
 
     const handleSendMessage = (messageContent) => {
@@ -87,17 +74,17 @@ function ChatWindow() {
             tempId: `temp_${Date.now()}`, // Temporary ID for optimistic UI updates
         }
 
-        socketService.sendMessage(messageData);
+        sendMessage(messageData);
     }
 
     const handleTypingStart = () => {
         if (!activeChat) return;
-        socketService.typingStart(activeChat._id);
+        typingStart(activeChat._id);
     }
 
     const handleTypingStop = () => {
         if (!activeChat) return;
-        socketService.typingStop(activeChat._id);
+        typingStop(activeChat._id);
     }
 
     // View when no chat is selected
