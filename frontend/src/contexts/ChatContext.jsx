@@ -12,6 +12,19 @@ import api from "../services/api";
 import socketService from "../services/socket";
 import useCleanSocketDisconnect from '../hooks/useCleanSocketDisconnect';
 
+// UUID generator (v4)
+const makeUUID = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // fallback if crypto.randomUUID not available
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
 export const ChatContext = createContext(null);
 
 // Helper to clone and compute delivered/read statuses
@@ -166,7 +179,7 @@ export function ChatProvider({ children }) {
     const chatId = messageData?.chatId;
     const content = messageData?.content;
     const messageType = messageData?.messageType || 'text';
-    const tempId = messageData?.tempId || `temp_${Date.now()}`;
+    const tempId = messageData?.tempId || makeUUID();
 
     if (!isAuthenticated || !user?._id || !chatId || !content?.trim()) return;
 
@@ -178,7 +191,9 @@ export function ChatProvider({ children }) {
       messageType,
       createdAt: new Date().toISOString(),
       deliveredTo: [],
-      readBy: [user._id]
+      readBy: [user._id],
+      sending: true,
+      failed: false
     }
 
     // optimistic push in the open chat
@@ -242,15 +257,14 @@ export function ChatProvider({ children }) {
             }
           }
 
-          // 2) Fallback: if message is mine, replace the most recent optimistic temp_* with same content
-          // (covers the case where server doesn't send tempId but echoes newMessage to sender)
+          // 2) Fallback: if this message is mine, replace the most recent *optimistic* bubble
+          // with the same content. We detect optimistic by `sending === true` (set in sendMessage).
           if (fromMe) {
-            // search from end for the freshest optimistic bubble
             for (let i = prev.length - 1; i >= 0; i--) {
               const m = prev[i];
-              const isTemp = typeof m._id === 'string' && m._id.startsWith('temp_');
               const isMine = m.sender?._id?.toString() === user?._id?.toString();
-              if (isTemp && isMine && m.content === newMessage.content) {
+              const looksOptimistic = m.sending === true; // <-- UUIDs don't start with "temp_", use this flag
+              if (looksOptimistic && isMine && m.content === newMessage.content) {
                 const copy = [...prev];
                 copy[i] = newMessage;
                 return copy;
@@ -419,6 +433,7 @@ const handleMessageDeliveryUpdate = useCallback(
   // Server confirms a message we sent (replace optimistic temp message)
   const handleMessageSentAck = useCallback(({ tempId, message }) => {
     if (!tempId || !message) return;
+
     setMessages(prev => {
       const i = prev.findIndex(m => m._id === tempId);
       if (i === -1) return prev;
