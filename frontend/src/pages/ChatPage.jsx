@@ -1,7 +1,6 @@
 import React from 'react';
 //import { ChatProvider } from '../contexts/ChatContext';
 import { useChat } from '../hooks/useChat';
-import { useAuth } from '../hooks/useAuth';
 import ChatList from '../components/chat/ChatList';
 import ChatWindow from '../components/chat/ChatWindow';
 import UserProfileCard from '../components/user/UserProfileCard';
@@ -15,10 +14,7 @@ function ChatPage() {
 
 // This component consumes chat context and auth
 function ChatAppContent() {
-  const { user } = useAuth();
-  const { activeChat, presence } = useChat();
-
-  const me = presence[user._id] || {};
+  const { activeChat } = useChat();
 
   return (
     <div className="flex h-screen antialiased text-gray-800 bg-slate-900">
@@ -49,7 +45,6 @@ function ChatAppContent() {
         {/* User Profile Card */}
         <div className="mt-4">
           <UserProfileCard />
-          {console.log(`presence ${me.onlineStatus}`)}
         </div>
 
         <ChatList />
