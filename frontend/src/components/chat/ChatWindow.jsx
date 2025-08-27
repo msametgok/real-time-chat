@@ -71,7 +71,7 @@ function ChatWindow() {
             chatId: activeChat._id,
             messageType: 'text',
             content: messageContent,
-            tempId: `temp_${Date.now()}`, // Temporary ID for optimistic UI updates
+            tempId: crypto.randomUUID ? crypto.randomUUID() : `temp_${Date.now()}`, // Temporary ID for optimistic UI updates
         }
 
         sendMessage(messageData);
