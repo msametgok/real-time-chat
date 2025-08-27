@@ -139,7 +139,7 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, 
             });
 
             // Acknowledge to the sender that the message was processed
-            socket.emit('messageSentAck', { tempId, finalMessage: populated });
+            socket.emit('messageSentAck', { tempId, message: populated });
 
             // 3) Emit delivery‐receipt events only for truly online users and update DB
             for (const participantId of chat.participants.map(p => p.toString())) {
