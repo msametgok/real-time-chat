@@ -9,10 +9,12 @@ const formatMessageTime = (timestamp) => {
     })
 }
 
-function MessageBubble({ message, isOwnMessage, showSenderInfo }) {
+function MessageBubble({ message, isOwnMessage, showSenderInfo, onRetry }) {
     // Determine bubble alignment and color based on who sent it
     const bubbleAlignment = isOwnMessage ? "items-end": "items-start";
-    const bubbleColor = isOwnMessage ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-200';
+    const bubbleColor = message.failed
+        ? 'bg-red-900/60 text-red-100 ring-1 ring-red-500'
+        : isOwnMessage ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-200';
 
     const topMargin = showSenderInfo ? 'mt-4' : 'mt-1';
 
@@ -49,8 +51,25 @@ function MessageBubble({ message, isOwnMessage, showSenderInfo }) {
                 
                 {/* Timestamp and Status Ticks */}
                 <div className={`text-xs pt-1 text-right flex items-center justify-end gap-1 ${isOwnMessage ? 'text-indigo-200' : 'text-slate-400'}`}>
-                    <span>{formatMessageTime(message.createdAt)}</span>
-                    {isOwnMessage && <MessageStatusTicks message={message} />}
+                    {message.failed ? (
+                        <>
+                            <span className="text-red-300 font-medium">Not delivered</span>
+                            {onRetry && (
+                                <button
+                                    type="button"
+                                    onClick={() => onRetry(message._id)}
+                                    className="ml-1 underline text-red-200 hover:text-white font-medium"
+                                >
+                                    Retry
+                                </button>
+                            )}
+                        </>
+                    ) : (
+                        <>
+                            <span>{formatMessageTime(message.createdAt)}</span>
+                            {isOwnMessage && <MessageStatusTicks message={message} />}
+                        </>
+                    )}
                 </div>
             </div>
 

@@ -6,7 +6,7 @@ import LoadingSpinner from "../common/LoadingSpinner";
 
 function MessageList() {
     const { user } = useAuth();
-    const { activeChat, messages, fetchMessages, isLoadingMessages } = useChat();
+    const { activeChat, messages, fetchMessages, isLoadingMessages, retryMessage } = useChat();
     const scrollRef = useRef(null); // Reference for the message container div
 
     // State to track scroll context ONLY for loading older messages
@@ -92,6 +92,7 @@ function MessageList() {
                 message={message}
                 isOwnMessage={isOwnMessage}
                 showSenderInfo={showSenderInfo}
+                onRetry={retryMessage}
                 />
             );
             })}

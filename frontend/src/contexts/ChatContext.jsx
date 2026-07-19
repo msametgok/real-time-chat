@@ -82,6 +82,12 @@ export function ChatProvider({ children }) {
   const [chats, setChats] = useState([]);
   const [activeChat, setActiveChat] = useState(null);
   const [messages, setMessages] = useState([]);
+
+  // Mirror of `messages` for callbacks that need the current value synchronously
+  // without taking `messages` as a dependency (which would recreate them on
+  // every incoming message).
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
   const [isLoadingChats, setIsLoadingChats] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [chatError, setChatError] = useState(null);
@@ -146,9 +152,22 @@ export function ChatProvider({ children }) {
           calculateAndApplyStatus(m, currentChat)
         );
         const sorted = withStatus.reverse();
-        setMessages(prev =>
-          beforeTimestamp ? [...sorted, ...prev] : sorted
-        );
+        setMessages(prev => {
+          if (beforeTimestamp) return [...sorted, ...prev];
+
+          // A full replace would drop messages that exist only on the client -
+          // failed sends and in-flight optimistic bubbles were never persisted,
+          // so the server can't return them. Re-append them or the user's text
+          // silently vanishes (and any Retry button with it).
+          const serverIds = new Set(sorted.map(m => m._id.toString()));
+          const pendingLocal = prev.filter(
+            m =>
+              (m.failed || m.sending) &&
+              !serverIds.has(m._id.toString()) &&
+              (m.chat ? m.chat.toString() === chatId.toString() : true)
+          );
+          return pendingLocal.length ? [...sorted, ...pendingLocal] : sorted;
+        });
       } catch (err) {
         console.error(`ChatContext: fetchMessages error for ${chatId}`, err);
         setMessagesError(err.message || "Failed to load messages");
@@ -211,9 +230,48 @@ export function ChatProvider({ children }) {
       
     );
 
-    // actual emit
-    socketService.sendMessage({ chatId, messageType, content, tempId});
+    // actual emit - if the socket is down nothing will ever ack this, so mark
+    // it failed immediately rather than leaving it spinning.
+    const sent = socketService.sendMessage({ chatId, messageType, content, tempId });
+    if (!sent) {
+      setMessages(prev =>
+        prev.map(m => (m._id === tempId ? { ...m, sending: false, failed: true } : m))
+      );
+      setMessagesError('You appear to be offline. Message not sent.');
+    }
   }, [isAuthenticated, user?._id, user?.username, activeChat?._id]);
+
+  // Re-send a message that previously failed. Reuses the SAME tempId so the
+  // existing bubble is reconciled by messageSentAck rather than duplicated.
+  const retryMessage = useCallback((tempId) => {
+    if (!tempId) return;
+
+    // Read from the ref, NOT from inside a setMessages updater: React defers
+    // updater functions to render time, so anything captured in one is still
+    // unset on the next line.
+    const target = messagesRef.current.find(m => m._id === tempId);
+    if (!target) return;
+
+    setMessages(prev =>
+      prev.map(m => (m._id === tempId ? { ...m, sending: true, failed: false } : m))
+    );
+
+    setMessagesError(null);
+
+    const sent = socketService.sendMessage({
+      chatId: target.chat,
+      messageType: target.messageType || 'text',
+      content: target.content,
+      tempId
+    });
+
+    if (!sent) {
+      setMessages(prev =>
+        prev.map(m => (m._id === tempId ? { ...m, sending: false, failed: true } : m))
+      );
+      setMessagesError('Still offline. Message not sent.');
+    }
+  }, []);
 
   const typingStart = useCallback((chatId) => {
     if (!chatId) return;
@@ -450,6 +508,20 @@ const handleMessageDeliveryUpdate = useCallback(
     );
   }, []);
 
+  // Server rejected or failed a send. The payload carries the tempId so we can
+  // find the exact optimistic bubble and mark it failed instead of leaving it
+  // spinning forever.
+  const handleMessageError = useCallback(({ tempId, message }) => {
+    if (tempId) {
+      setMessages(prev =>
+        prev.map(m =>
+          m._id === tempId ? { ...m, sending: false, failed: true } : m
+        )
+      );
+    }
+    setMessagesError(message || 'Failed to send message.');
+  }, []);
+
   // ─── 5) REGISTER HANDLERS ───
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -461,6 +533,7 @@ const handleMessageDeliveryUpdate = useCallback(
     socketService.onChatListUpdate(handleChatListUpdate);
     socketService.onUserConnectedToChat(handleUserConnectedToChat);
     socketService.onMessageSentAck(handleMessageSentAck);
+    socketService.onMessageError(handleMessageError);
 
     return () => {
       socketService.offNewMessage(handleNewMessage);
@@ -470,6 +543,7 @@ const handleMessageDeliveryUpdate = useCallback(
       socketService.offChatListUpdate(handleChatListUpdate);
       socketService.offUserConnectedToChat(handleUserConnectedToChat);
       socketService.offMessageSentAck(handleMessageSentAck);
+      socketService.offMessageError(handleMessageError);
     };
   }, [
     isAuthenticated,
@@ -479,7 +553,8 @@ const handleMessageDeliveryUpdate = useCallback(
     handleMessageDeliveryUpdate,
     handleChatListUpdate,
     handleUserConnectedToChat,
-    handleMessageSentAck
+    handleMessageSentAck,
+    handleMessageError
   ]);
 
   // ─── 6) CONNECT/DISCONNECT SOCKET ───
@@ -528,54 +603,91 @@ const handleMessageDeliveryUpdate = useCallback(
   }, [hasConnected, chats]);
 
 
-  // ─── 6.6) ALWAYS RE-JOIN ROOMS AFTER (RE)CONNECT ───
+  // ─── 6.6) ALWAYS RE-JOIN ROOMS AND RESYNC AFTER (RE)CONNECT ───
   // On refresh or network hiccup, the server drops all room memberships for the new socket.id.
   // Our joinedChatsRef still says "we're joined", so 6.5 won't re-emit. Do it explicitly here.
+  //
+  // Rejoining alone is NOT enough: anything sent while we were disconnected was
+  // broadcast to a room we weren't in, and the server's sync only replays tick
+  // state - never message content. Without an explicit refetch those messages
+  // stay missing until a manual page reload.
+  //
+  // Everything the listener needs lives in refs so this effect can depend only
+  // on `hasConnected`. Depending on `chats`/`activeChat` would tear down and
+  // re-register the listener on every incoming message.
+  const resyncRef = useRef({ chats: [], activeChatId: null, fetchChats: null, fetchMessages: null });
+  resyncRef.current = {
+    chats,
+    activeChatId: activeChat?._id ?? null,
+    fetchChats,
+    fetchMessages
+  };
+
   useEffect(() => {
     if (!hasConnected) return;
     const sock = socketService.getSocket();
     if (!sock) return;
 
-    const handleConnect = () => {
-      console.log("🔌 (Re)connected → rejoining all chats so sidebar updates keep working");
+    const handleConnect = async () => {
+      const { chats: currentChats, activeChatId, fetchChats: refetchChats, fetchMessages: refetchMessages } =
+        resyncRef.current;
+
       // Re-join every chat regardless of joinedChatsRef; server will ignore duplicates.
-      chats.forEach(c => socketService.joinChat(c._id));
-      // Keep the local cache in sync with what we just joined.
-      joinedChatsRef.current = new Set(chats.map(c => c._id));
+      currentChats.forEach(c => socketService.joinChat(c._id));
+      joinedChatsRef.current = new Set(currentChats.map(c => c._id));
+
+      // Then pull anything we missed while we were away.
+      try {
+        await refetchChats?.();
+        if (activeChatId) await refetchMessages?.(activeChatId);
+      } catch (err) {
+        console.error('ChatContext: resync after reconnect failed', err);
+      }
     };
 
     sock.on('connect', handleConnect);
     return () => sock.off('connect', handleConnect);
-  }, [hasConnected, chats]);
+  }, [hasConnected]);
 
 
-  // ─── 7) CATCH-UP: latestMessage in every chat ───
+  // ─── 7/8) CATCH-UP: report delivery for messages we have but haven't acked ───
+  // These effects depend on `chats`/`messages`, which change on EVERY incoming
+  // message, so without a guard they re-emit the whole array each time. Track
+  // what we've already reported and only emit for genuinely new message IDs.
+  const deliveryAckedRef = useRef(new Set());
+
+  const reportDelivery = useCallback(
+    (message, chatId) => {
+      if (!message?._id || !chatId) return;
+      if (message.sender?._id === user?._id) return;
+      if ((message.deliveredTo || []).map(d => d.toString()).includes(user?._id)) return;
+
+      const key = message._id.toString();
+      if (deliveryAckedRef.current.has(key)) return;
+
+      deliveryAckedRef.current.add(key);
+      socketService.messageDeliveredToClient(message._id, chatId);
+    },
+    [user?._id]
+  );
+
+  // 7) latestMessage in every chat
   useEffect(() => {
     if (!hasConnected) return;
-    chats.forEach(c => {
-      const m = c.latestMessage;
-      if (
-        m &&
-        m.sender?._id !== user?._id &&
-        !(m.deliveredTo || []).map(d => d.toString()).includes(user?._id)
-      ) {
-        socketService.messageDeliveredToClient(m._id, c._id);
-      }
-    });
-  }, [hasConnected, chats, user]);
+    chats.forEach(c => reportDelivery(c.latestMessage, c._id));
+  }, [hasConnected, chats, reportDelivery]);
 
-  // ─── 8) CATCH-UP: all messages in the activeChat ───
+  // 8) all messages in the activeChat
   useEffect(() => {
     if (!hasConnected || !activeChat) return;
-    messages.forEach(m => {
-      if (
-        m.sender?._id !== user?._id &&
-        !(m.deliveredTo || []).map(d => d.toString()).includes(user?._id)
-      ) {
-        socketService.messageDeliveredToClient(m._id, activeChat._id);
-      }
-    });
-  }, [hasConnected, activeChat, messages, user]);
+    messages.forEach(m => reportDelivery(m, activeChat._id));
+  }, [hasConnected, activeChat, messages, reportDelivery]);
+
+  // The server's 30s Redis claim expires, and a reconnect may mean the server
+  // never recorded our earlier acks - clear the local guard so we re-report.
+  useEffect(() => {
+    if (!hasConnected) deliveryAckedRef.current.clear();
+  }, [hasConnected]);
 
   // ─── 9) Chat creation helpers ───
   const createOneOnOneChatAPI = useCallback(
@@ -643,6 +755,7 @@ const handleMessageDeliveryUpdate = useCallback(
     hasConnected,
     presence,
     sendMessage,
+    retryMessage,
     typingStart,
     typingStop,
     markMessagesAsRead

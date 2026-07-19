@@ -1,24 +1,35 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 
 function MessageInput({ onSendMessage, onTypingStart, onTypingStop }) {
     const [inputValue, setInputValue] = useState('');
-    let typingTimeout = null;
+
+    // Must be a ref, not a plain `let`: setInputValue re-renders on every
+    // keystroke, which would reset a local variable to null and make the
+    // clearTimeout below a no-op - leaking a timer per keystroke.
+    const typingTimeoutRef = useRef(null);
+    const isTypingRef = useRef(false);
+
+    const stopTyping = () => {
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = null;
+        if (isTypingRef.current) {
+            isTypingRef.current = false;
+            onTypingStop?.();
+        }
+    };
 
     const handleInputChange = (e) => {
         setInputValue(e.target.value);
 
-        // Emit typing start event
-        if (onTypingStart) {
-            onTypingStart();
+        // Only announce the start of a typing burst, not every keystroke.
+        if (!isTypingRef.current) {
+            isTypingRef.current = true;
+            onTypingStart?.();
         }
 
-        // Clear previous timeout and set a new one for typing stop
-        clearTimeout(typingTimeout);
-        typingTimeout = setTimeout(() => {
-            if (onTypingStop) {
-                onTypingStop();
-            }
-        }, 2000);
+        // Restart the idle countdown.
+        clearTimeout(typingTimeoutRef.current);
+        typingTimeoutRef.current = setTimeout(stopTyping, 2000);
     }
 
     const handleSendMessage = (e) => {
@@ -27,12 +38,12 @@ function MessageInput({ onSendMessage, onTypingStart, onTypingStop }) {
         if (trimmedInput) {
             onSendMessage(trimmedInput);
             setInputValue(''); // Clear input after sending
-            clearTimeout(typingTimeout);
-            if (onTypingStop) {
-                onTypingStop();
-            } 
+            stopTyping();
         }
     }
+
+    // Don't leave a pending timer (or a stuck "typing" indicator) behind.
+    useEffect(() => () => clearTimeout(typingTimeoutRef.current), []);
 
     return (
         <div className="border-t-2 border-slate-700 px-4 pt-4 sm:pb-4 pb-2">

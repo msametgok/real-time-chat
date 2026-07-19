@@ -93,21 +93,27 @@ class SocketService {
     this.socket.on('chatListUpdate', data => this.eventCallbacks.chatListUpdate?.(data));
   }
 
-  // Generic emitter
+  // Generic emitter. Returns whether the event actually went out, so callers
+  // that own optimistic UI can fail fast instead of waiting on a reply that
+  // will never come.
   emit(eventName, data) {
-    if (this.socket && this.socket.connected) {
-      try {
-        this.socket.emit(eventName, data);
-      } catch (err) {
-        console.error(`SocketService.emit error on '${eventName}':`, err);
-      }
+    if (!this.socket || !this.socket.connected) {
+      console.warn(`SocketService: dropped '${eventName}' - socket not connected`);
+      return false;
+    }
+    try {
+      this.socket.emit(eventName, data);
+      return true;
+    } catch (err) {
+      console.error(`SocketService.emit error on '${eventName}':`, err);
+      return false;
     }
   }
 
   // ——— Emitter shortcuts ———
   joinChat(chatId) { this.emit('joinChat', { chatId }); }
   leaveChat(chatId) { this.emit('leaveChat', { chatId }); }
-  sendMessage(data) { this.emit('sendMessage', data); }
+  sendMessage(data) { return this.emit('sendMessage', data); }
   typingStart(chatId) { this.emit('typingStart', { chatId }); }
   typingStop(chatId) { this.emit('typingStop', { chatId }); }
   markMessagesAsRead(chatId, messageIds) { this.emit('markMessagesAsRead', { chatId, messageIds }); }
