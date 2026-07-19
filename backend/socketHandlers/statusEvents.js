@@ -6,7 +6,7 @@ const areAllOtherInArray = (statusArray = [], participants = [], senderId) => {
     return others.every(pid => statusIds.includes(pid));
 };
 
-module.exports = ({ io, socket, logger, Message, Chat }) => {
+module.exports = ({ io, socket, logger, redis, Message, Chat }) => {
 
     /**
      * Handles a client event indicating that messages in a chat have been read by the user.
@@ -14,10 +14,14 @@ module.exports = ({ io, socket, logger, Message, Chat }) => {
      * where messageIds are messages the current user has just read.
      */
     socket.on('markMessagesAsRead', async (data) => {
+        // Hoisted so the catch block can read them - see chatEvents.js
+        let chatId;
+        const readerId = socket.user.userId;
+        const readerName = socket.user.username;
+
         try {
-            const { chatId, messageIds } = data || {};
-            const readerId = socket.user.userId;
-            const readerName = socket.user.username;
+            let messageIds;
+            ({ chatId, messageIds } = data || {});
 
             logger.info(`User ${readerName} (Socket: ${socket.id}) marking messages as read in chat: ${chatId}`);
 
@@ -93,48 +97,52 @@ module.exports = ({ io, socket, logger, Message, Chat }) => {
      * Handles an event when a message has been delivered to a specific client's device/app.
      * Client should send: { messageId: '...', chatId: '...' }
      */
-module.exports = ({ io, socket, logger, Chat, Message }) => {
-  socket.on('messageDeliveredToClient', async ({ chatId, messageId }) => {
-    const userId = socket.user.userId;
-    try {
-      // 1) Atomically add this user to deliveredTo if not already present
-      const updatedMsg = await Message.findOneAndUpdate(
-        { _id: messageId, deliveredTo: { $ne: userId } },
-        { $addToSet: { deliveredTo: userId } },
-        { new: true, select: 'sender deliveredTo' }
-      ).lean();
+    socket.on('messageDeliveredToClient', async ({ chatId, messageId } = {}) => {
+        const userId = socket.user.userId;
+        try {
+            if (!chatId || !messageId) {
+                return socket.emit('statusError', { chatId, message: 'Chat ID and Message ID are required.' });
+            }
 
-      // Check if Redis already marked this delivery event
-      const deliveryKey = `delivery:${messageId}:${userId}`;
-      const alreadyHandled = await redis.set(deliveryKey, '1', 'NX', 'EX', 30); // 30s TTL
+            // 1) Claim this delivery event BEFORE touching the DB, so duplicate
+            //    emits (reconnect, multi-tab) never reach Mongo at all.
+            const deliveryKey = `delivery:${messageId}:${userId}`;
+            const claimed = await redis.set(deliveryKey, '1', 'NX', 'EX', 30); // 30s TTL
+            if (!claimed) return; // another emit already handled this one
 
-      if (!updatedMsg || !alreadyHandled) return; // skip duplicate
+            // 2) Atomically add this user to deliveredTo if not already present.
+            //    Returns null when the user was already there - nothing to broadcast.
+            const updatedMsg = await Message.findOneAndUpdate(
+                { _id: messageId, deliveredTo: { $ne: userId } },
+                { $addToSet: { deliveredTo: userId } },
+                { new: true, select: 'sender deliveredTo' }
+            ).lean();
 
-      // 2) Check if *all* other participants have now delivered it
-      const chat = await Chat.findById(chatId).select('participants').lean();
-      const senderId = updatedMsg.sender.toString();
-      const otherIds = chat.participants
-        .map(p => p.toString())
-        .filter(id => id !== senderId);
+            if (!updatedMsg) return;
 
-      const deliveredToAll = otherIds.every(id =>
-        updatedMsg.deliveredTo.map(d => d.toString()).includes(id)
-      );
+            // 3) Check if *all* other participants have now received it
+            const chat = await Chat.findById(chatId).select('participants').lean();
+            if (!chat) return;
 
-      // 3) Broadcast a delivery update for *this* message
-      io.to(chatId).emit('messageDeliveryUpdate', {
-        chatId,
-        messageId,
-        deliveredToUserId: userId,
-        deliveredToAll
-      });
+            const deliveredToAll = areAllOtherInArray(
+                updatedMsg.deliveredTo,
+                chat.participants,
+                updatedMsg.sender
+            );
 
-    } catch (err) {
-      logger.error(
-        `statusEvents: Error in messageDeliveredToClient for msg ${messageId}, user ${userId}: ${err.message}`,
-        err
-      );
-    }
-  });
-};
+            // 4) Broadcast a delivery update for *this* message
+            io.to(chatId).emit('messageDeliveryUpdate', {
+                chatId,
+                messageId,
+                deliveredToUserId: userId,
+                deliveredToAll
+            });
+
+        } catch (err) {
+            logger.error(
+                `statusEvents: Error in messageDeliveredToClient for msg ${messageId}, user ${userId}: ${err.message}`,
+                err
+            );
+        }
+    });
 };

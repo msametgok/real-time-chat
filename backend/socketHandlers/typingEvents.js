@@ -4,11 +4,12 @@ const getTypingKey = (chatId, userId) => `typing:${chatId}:${userId}`;
 module.exports = ({ io, socket, logger, redis }) => {
 
     socket.on('typingStart', async (data) => {
-        try {
+        // Hoisted so the catch block can read them - see chatEvents.js
+        let chatId;
+        const { userId, username } = socket.user;
 
-            const { chatId } = data || {};
-            const userId = socket.user.userId;
-            const username = socket.user.username;
+        try {
+            ({ chatId } = data || {});
 
             if (!chatId) {
                 logger.warn(`User ${username} (Socket: ${socket.id}) 'typingStart' without chatId.`);
@@ -35,10 +36,11 @@ module.exports = ({ io, socket, logger, redis }) => {
     });
 
     socket.on('typingStop', async (data) => {
+        let chatId;
+        const { userId, username } = socket.user;
+
         try {
-            const { chatId } = data || {};
-            const userId = socket.user.userId;
-            const username = socket.user.username;
+            ({ chatId } = data || {});
 
             logger.debug(`User ${username} (Socket: ${socket.id}) 'typingStop' for chat: ${chatId}`);
 

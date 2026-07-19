@@ -2,10 +2,14 @@
 module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, invalidateChatCache }) => {
 
     socket.on('joinChat', async (data) => {
+        // Declared outside the try so the catch block can actually read them -
+        // a `const` inside the try is out of scope in the catch, which made the
+        // error handler itself throw ReferenceError and swallow the real error.
+        let chatId;
+        const { userId, username } = socket.user;
+
         try {
-            const { chatId } = data || {};
-            const userId = socket.user.userId;
-            const username = socket.user.username;
+            ({ chatId } = data || {});
 
             logger.info(`User ${username} (ID: ${userId}, Socket: ${socket.id}) attempting to join chat: ${chatId}`);
 
@@ -35,10 +39,11 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, 
     });
 
     socket.on('leaveChat', async (data) => {
+        let chatId;
+        const { userId, username } = socket.user;
+
         try {
-            const { chatId } = data || {};
-            const userId = socket.user.userId;
-            const username = socket.user.username;
+            ({ chatId } = data || {});
 
             logger.info(`User ${username} (ID: ${userId}, Socket: ${socket.id}) attempting to leave chat: ${chatId}`);
 
@@ -62,21 +67,27 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, 
     });
 
     socket.on('sendMessage', async (data) => {
+        // tempId is hoisted alongside chatId so the catch can tell the client
+        // WHICH optimistic bubble failed - without it the client cannot clear
+        // the pending state and the message spins forever.
+        let chatId;
+        let tempId;
+        const { userId, username } = socket.user;
+
         try {
-            const { chatId, messageType, content, fileUrl, fileName, fileType, fileSize, tempId } = data || {};
-            const userId = socket.user.userId;
-            const username = socket.user.username;
+            let messageType, content, fileUrl, fileName, fileType, fileSize;
+            ({ chatId, messageType, content, fileUrl, fileName, fileType, fileSize, tempId } = data || {});
 
             if (!chatId || !messageType) {
                 logger.warn(`sendMessage missing parameters from ${username}`);
-                return socket.emit('messageError', { message: 'chatId and messageType are required.' });
+                return socket.emit('messageError', { tempId, message: 'chatId and messageType are required.' });
             }
-        
+
             // Verify user is part of the chat
             const chat = await Chat.findOne({ _id: chatId, participants: userId }).lean();
             if (!chat) {
                 logger.warn(`Unauthorized sendMessage by ${username} to ${chatId}`);
-                return socket.emit('messageError', { chatId, message: 'Access denied.' });
+                return socket.emit('messageError', { chatId, tempId, message: 'Access denied.' });
             }
 
             let msg = {
@@ -122,8 +133,6 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, 
                     populated.content = null; // Or some placeholder for caption
                 }
             }
-
-            console.log('ALOOOOOOOOOOOOOOOOOOOO');
 
             io.to(chatId).emit('newMessage', populated);
             const chatListPayload = {
@@ -180,7 +189,7 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, 
 
         } catch (error) {
             logger.error(`Error during 'sendMessage' for user ${username} (Socket: ${socket.id}), chat ${chatId}: ${error.message}`, error);
-            socket.emit('messageError', { message: 'Failed to send message.' });
+            socket.emit('messageError', { chatId, tempId, message: 'Failed to send message.' });
         }
     });
 };
