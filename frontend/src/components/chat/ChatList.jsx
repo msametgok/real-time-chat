@@ -7,6 +7,9 @@ import LoadingSpinner from '../common/LoadingSpinner';
 function ChatListItem({ chat, currentUserId, isActive, onSelectChat }) {
   const { displayChatName, chatAvatar, latestMessage } = chat;
 
+  // Client-side only: counts start from zero on refresh, which is accepted.
+  const unreadCount = isActive ? 0 : (chat.unreadCount || 0);
+
   let lastMessageText = 'No messages yet';
   let lastMessageTime = '';
   let senderPrefix = '';
@@ -63,15 +66,25 @@ function ChatListItem({ chat, currentUserId, isActive, onSelectChat }) {
         <div className={`font-semibold text-sm ${isActive ? 'text-white' : 'text-slate-200'}`}>
           {nameToDisplay || "Chat"}
         </div>
-        <p className={`text-xs truncate ${isActive ? 'text-indigo-100' : 'text-slate-400'}`}>
+        <p className={`text-xs truncate ${unreadCount > 0 ? 'text-slate-200 font-medium' : isActive ? 'text-indigo-100' : 'text-slate-400'}`}>
           {senderPrefix}{lastMessageText}
         </p>
       </div>
-      {lastMessageTime && (
-        <div className={`text-xs self-start pt-1 ml-2 flex-shrink-0 ${isActive ? 'text-indigo-200' : 'text-slate-500'}`}>
-          {lastMessageTime}
-        </div>
-      )}
+      <div className="flex flex-col items-end self-start pt-1 ml-2 flex-shrink-0 gap-1">
+        {lastMessageTime && (
+          <span className={`text-xs ${isActive ? 'text-indigo-200' : 'text-slate-500'}`}>
+            {lastMessageTime}
+          </span>
+        )}
+        {unreadCount > 0 && (
+          <span
+            aria-label={`${unreadCount} unread messages`}
+            className="min-w-[1.25rem] h-5 px-1.5 flex items-center justify-center rounded-full bg-indigo-500 text-white text-[0.65rem] font-semibold"
+          >
+            {unreadCount > 99 ? '99+' : unreadCount}
+          </span>
+        )}
+      </div>
     </button>
   );
 

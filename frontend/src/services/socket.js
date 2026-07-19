@@ -22,8 +22,6 @@ class SocketService {
       chatError: null,
       messageError: null,
       statusError: null,
-      // ← NEW:
-      chatListUpdate: null,
     };
   }
 
@@ -88,9 +86,6 @@ class SocketService {
     this.socket.on('chatError', data => this.eventCallbacks.chatError?.(data));
     this.socket.on('messageError', data => this.eventCallbacks.messageError?.(data));
     this.socket.on('statusError', data => this.eventCallbacks.statusError?.(data));
-
-    // ← NEW: chatListUpdate
-    this.socket.on('chatListUpdate', data => this.eventCallbacks.chatListUpdate?.(data));
   }
 
   // Generic emitter. Returns whether the event actually went out, so callers
@@ -171,10 +166,6 @@ class SocketService {
 
   onStatusError(cb) { this._registerListener('statusError', cb); }
   offStatusError(cb) { this._unregisterListener('statusError', cb); }
-
-  // ← NEW listener methods for chatListUpdate:
-  onChatListUpdate(cb) { this._registerListener('chatListUpdate', cb); }
-  offChatListUpdate(cb) { this._unregisterListener('chatListUpdate', cb); }
 
   disconnect() {
     if (this.socket) {

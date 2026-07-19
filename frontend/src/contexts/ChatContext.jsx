@@ -187,6 +187,12 @@ export function ChatProvider({ children }) {
       setActiveChat(sel);
       setMessages([]);
       if (sel) {
+        // Opening a chat clears its badge. handleNewMessage skips the increment
+        // while a chat is active, so this only has to cover what accumulated
+        // before the switch.
+        setChats(prev =>
+          prev.map(c => (c._id === chatId ? { ...c, unreadCount: 0 } : c))
+        );
         await fetchMessages(chatId);
       }
     },
@@ -304,50 +310,40 @@ export function ChatProvider({ children }) {
       }
 
       if (newMessage.chat === activeChat?._id) {
+        // The server no longer broadcasts newMessage back to the sender - they
+        // get messageSentAck instead, which carries the tempId and reconciles
+        // the optimistic bubble exactly. So there is nothing to match here:
+        // append if we don't already have it.
+        //
+        // The old content-matching fallback scanned backwards for an optimistic
+        // bubble with the same text, which rendered two identical messages sent
+        // in a row permanently reversed.
         setMessages((prev) => {
-          // 1) If server included tempId, replace by tempId (fast path)
-          if (newMessage.tempId) {
-            const idx = prev.findIndex((m) => m._id === newMessage.tempId);
-            if (idx !== -1) {
-              const copy = [...prev];
-              copy[idx] = newMessage;
-              return copy;
-            }
-          }
-
-          // 2) Fallback: if this message is mine, replace the most recent *optimistic* bubble
-          // with the same content. We detect optimistic by `sending === true` (set in sendMessage).
-          if (fromMe) {
-            for (let i = prev.length - 1; i >= 0; i--) {
-              const m = prev[i];
-              const isMine = m.sender?._id?.toString() === user?._id?.toString();
-              const looksOptimistic = m.sending === true; // <-- UUIDs don't start with "temp_", use this flag
-              if (looksOptimistic && isMine && m.content === newMessage.content) {
-                const copy = [...prev];
-                copy[i] = newMessage;
-                return copy;
-              }
-            }
-          }
-
-          // 3) Otherwise: append only if we don't already have the real one
           const exists = prev.some((m) => m._id === newMessage._id);
           if (exists) return prev;
           return [...prev, newMessage];
         });
       }
 
-      // Update sidebar preview / unread counters
+      // Update sidebar preview / unread counters. This is now the single writer
+      // for preview, ordering, and unread - chatListUpdate used to also increment
+      // here, so each message bumped the count by more than one.
       setChats((prev) =>
         prev
           .map((c) => {
             if (c._id === newMessage.chat) {
               const isActive = c._id === activeChat?._id;
+
+              // Viewing it means it's read; your own sends are never unread.
+              let unreadCount = c.unreadCount || 0;
+              if (isActive) unreadCount = 0;
+              else if (!fromMe) unreadCount += 1;
+
               return {
                 ...c,
                 latestMessage: newMessage,
                 updatedAt: newMessage.createdAt,
-                unreadCount: isActive ? 0 : (c.unreadCount || 0) + 1,
+                unreadCount,
               };
             }
             return c;
@@ -443,29 +439,6 @@ const handleMessageDeliveryUpdate = useCallback(
   [chats]
 );
 
-  // Sidebar chat-list update
-  const handleChatListUpdate = useCallback(
-    ({ chatId, latestMessage, timestamp }) => {
-      setChats(prev =>
-        prev
-          .map(c => {
-            if (c._id === chatId) {
-              const isActive = c._id === activeChat?._id;
-              return {
-                ...c,
-                latestMessage: latestMessage || c.latestMessage,
-                updatedAt: timestamp,
-                unreadCount: isActive ? 0 : (c.unreadCount || 0) + 1
-              };
-            }
-            return c;
-          })
-          .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-      );
-    },
-    [activeChat?._id]
-  );
-
   // ─── 4.5) USER CONNECTED TO CHAT (catch-up when someone comes online) ───
   const handleUserConnectedToChat = useCallback(
     ({ chatId, userId }) => {
@@ -530,7 +503,6 @@ const handleMessageDeliveryUpdate = useCallback(
     socketService.onTyping(handleTyping);
     socketService.onMessagesReadUpdate(handleMessagesReadUpdate);
     socketService.onMessageDeliveryUpdate(handleMessageDeliveryUpdate);
-    socketService.onChatListUpdate(handleChatListUpdate);
     socketService.onUserConnectedToChat(handleUserConnectedToChat);
     socketService.onMessageSentAck(handleMessageSentAck);
     socketService.onMessageError(handleMessageError);
@@ -540,7 +512,6 @@ const handleMessageDeliveryUpdate = useCallback(
       socketService.offTyping(handleTyping);
       socketService.offMessagesReadUpdate(handleMessagesReadUpdate);
       socketService.offMessageDeliveryUpdate(handleMessageDeliveryUpdate);
-      socketService.offChatListUpdate(handleChatListUpdate);
       socketService.offUserConnectedToChat(handleUserConnectedToChat);
       socketService.offMessageSentAck(handleMessageSentAck);
       socketService.offMessageError(handleMessageError);
@@ -551,7 +522,6 @@ const handleMessageDeliveryUpdate = useCallback(
     handleTyping,
     handleMessagesReadUpdate,
     handleMessageDeliveryUpdate,
-    handleChatListUpdate,
     handleUserConnectedToChat,
     handleMessageSentAck,
     handleMessageError

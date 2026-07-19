@@ -73,12 +73,6 @@ module.exports = ({ io, socket, logger, redis, Message, Chat }) => {
                     messageIds,
                     messagesReadByAll: readByAll
                 });
-
-                // Update chat list UI
-                io.to(chatId).emit('chatListUpdate', {
-                    chatId,
-                    timestamp: new Date().toISOString()
-                });
             }
 
             // Acknowledge back

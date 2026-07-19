@@ -134,21 +134,21 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, 
                 }
             }
 
-            io.to(chatId).emit('newMessage', populated);
-            const chatListPayload = {
-                chatId,
-                latestMessage: populated,
-                timestamp: new Date().toISOString()
-            };
-            // room for the conversation (so active chat user sees it immediately)
-            io.to(chatId).emit('chatListUpdate', chatListPayload);
-            // and each user's personal room (so sidebar users get it)
-            chat.participants.forEach(pid => {
-                io.to(`user-${pid}`).emit('chatListUpdate', chatListPayload);
-            });
-
-            // Acknowledge to the sender that the message was processed
+            // Ack the sender FIRST. The ack is the only payload carrying tempId,
+            // so the sender must see it before anything else can arrive - otherwise
+            // the client has no way to match the real message to its optimistic
+            // bubble and falls back to guessing by content.
             socket.emit('messageSentAck', { tempId, message: populated });
+
+            // Then broadcast to everyone else. socket.to() excludes the sender,
+            // who already has the message via the ack above; io.to() would deliver
+            // it twice and re-append a duplicate bubble.
+            //
+            // No separate chatListUpdate: every participant auto-joins all their
+            // chat rooms on connect, so this broadcast already reaches everyone
+            // online regardless of which chat they are viewing. Emitting a second
+            // sidebar event just made unread counts climb by 3 per message.
+            socket.to(chatId).emit('newMessage', populated);
 
             // 3) Emit delivery‐receipt events only for truly online users and update DB
             for (const participantId of chat.participants.map(p => p.toString())) {
