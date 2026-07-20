@@ -128,9 +128,11 @@ Scripted `socket.io-client` probes cover what the browser can't easily reach (re
 
 **Bug-fixing is done; the project is moving to feature work.** The remediation (Phases 0–5) landed earlier, and a follow-up pass on 2026-07-20 closed the realtime gaps it left behind: the silent mid-session socket loss, server-side unread counts, whole-chat read clearing, the dropped-emit badge repair, a heartbeat that detects a silent connection loss in ~15s instead of ~45s, and a dead-code sweep. All of it is unit-tested; the unread work was additionally verified against the real database, and the disconnect reason strings against a real socket.io client.
 
-**The backend is well ahead of the frontend, and that is the biggest opportunity.** Endpoints that are finished, routed and validated but still have no client method in `services/api.js`: `GET|PUT /api/users/profile`, `GET /api/users/:userId/profile`, `GET /api/chat/:chatId` (details), `DELETE /api/chat/:chatId` (delete-or-leave). Check this list before building anything — the server side may already be done. Note the HTTP mount is `/api/chat`, singular, while user routes are `/api/users`.
+**Phase 1 is done: everything the backend already had is now reachable from the UI.** Starting a chat (`NewChatModal`, from the `+ New chat` button in `ChatList`), removing one (menu in `ChatWindowHeader`), and viewing/editing your profile (`ProfileModal`, from the user card's Profile item). The `createChat.js` / `createChatViaApi.js` dev helpers existed only because chat creation had no button; they were deleted on 2026-07-20.
 
-The first of these gaps is now closed: **starting a chat works from the UI** (`NewChatModal`, reached from the `+ New chat` button in `ChatList`), built on the `GET /api/users` search plus the two create endpoints. The `createChat.js` / `createChatViaApi.js` dev helpers existed only because that button was missing and were deleted on 2026-07-20. Check this list before building anything: the server side may already be done.
+`GET /api/users/:userId/profile` and `GET /api/chat/:chatId` (details) still have no client method — neither is needed yet, but check before building. Note the HTTP mount is `/api/chat`, **singular**, while user routes are `/api/users`.
+
+Profile avatars are **URLs**, not uploads; `updateCurrentUserProfile` validates them with `isURL`. Actual file upload is the next phase. Check this list before building anything: the server side may already be done.
 
 The `Message` schema is likewise **already prepared for attachments** — `messageType` accepts `image|video|audio|file`, and `fileUrl`/`fileName`/`fileType`/`fileSize`/`metadata` all exist. `multer` is installed. Only an upload route and the UI are missing.
 
@@ -159,7 +161,7 @@ Known-incomplete features, roughly in order of how much is already done for you:
 |---|---|---|
 | ~~Start a chat / search users~~ | done | **done** — `NewChatModal` |
 | ~~Delete or leave a chat~~ | done, now a **soft delete** | **done** — menu in `ChatWindowHeader` |
-| View / edit own profile | done (`GET|PUT /users/profile`) | no `api.js` method |
+| ~~View / edit own profile~~ | done | **done** — `ProfileModal` |
 | File & image upload | schema + `multer` ready, **no route** | none |
 | Group admin actions | commented stubs, `chatController.js:417` | none |
 | Message edit / delete | none | none |
