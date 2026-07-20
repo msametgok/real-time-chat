@@ -20,12 +20,7 @@ export function AuthProvider({ children }) {
       return null;
     }
     try {
-      const profileData = await api.request(
-        "/api/users/profile",
-        "GET",
-        null,
-        token
-      );
+      const profileData = await api.getMyProfile(token);
       const userData = { ...profileData, token };
       setUser(userData);
       setIsAuthenticated(true);
