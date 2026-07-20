@@ -42,6 +42,50 @@ const formatChatResponse = (chat, currentUserId) => {
 }
 
 /**
+ * Attach a per-chat unread count for `currentUserId`.
+ *
+ * The badge was previously client-only: ChatContext incremented it when a
+ * `newMessage` socket event arrived. Messages that landed while the user was
+ * offline produced no event, so they showed in the sidebar with no count at
+ * all. The server has to supply the starting number.
+ *
+ * Deliberately NOT folded into the cached payload. `user:<id>:chats` lives for
+ * 5 minutes and is invalidated when a message is created, but nothing
+ * invalidates it when messages are marked read - so a cached count would keep
+ * showing a badge for a chat the user had already opened. One indexed
+ * aggregate per request keeps the number honest.
+ */
+const attachUnreadCounts = async (chats, currentUserId) => {
+    if (!chats.length) return chats;
+
+    const userObjectId = new mongoose.Types.ObjectId(currentUserId);
+    const chatIds = chats.map(c => new mongoose.Types.ObjectId(c._id));
+
+    // `$ne` on an array field matches documents whose array does NOT contain
+    // the value - i.e. everything this user has not read yet.
+    const counts = await Message.aggregate([
+        {
+            $match: {
+                chat: { $in: chatIds },
+                sender: { $ne: userObjectId },
+                readBy: { $ne: userObjectId }
+            }
+        },
+        { $group: { _id: '$chat', count: { $sum: 1 } } }
+    ]);
+
+    const byChatId = new Map(counts.map(c => [c._id.toString(), c.count]));
+
+    return chats.map(chat => ({
+        ...chat,
+        unreadCount: byChatId.get(chat._id.toString()) || 0
+    }));
+};
+
+// Exported for unit tests only; getUserChats is the sole production caller.
+exports.attachUnreadCounts = attachUnreadCounts;
+
+/**
  * Tell every participant a chat now exists. Creation happens over HTTP, so
  * without this the others have no idea until they reload - and their sockets
  * never join the new room either (the client rejoins on chat-list change, so
@@ -241,7 +285,9 @@ exports.getUserChats = [
             const cachedChats = await redis.get(cacheKey);
             if (cachedChats) {
                 logger.info(`Serving chats for user ${currentUserId} from cache.`);
-                return res.status(200).json(JSON.parse(cachedChats));
+                // Counts are recomputed even on a cache hit - see attachUnreadCounts.
+                const withCounts = await attachUnreadCounts(JSON.parse(cachedChats), currentUserId);
+                return res.status(200).json(withCounts);
             }
 
             logger.info(`Fetching chats for user ${currentUserId} from DB.`);
@@ -258,10 +304,11 @@ exports.getUserChats = [
 
             const formattedChats = chats.map(chat => formatChatResponse(chat, currentUserId));
 
-            // Store the result in Redis cache for 5 minutes (300 seconds)
+            // Cache WITHOUT the counts, so a stale badge can't be served later.
             await redis.set(cacheKey, JSON.stringify(formattedChats), 'EX', 300);
 
-            res.status(200).json(formattedChats);
+            const withCounts = await attachUnreadCounts(formattedChats, currentUserId);
+            res.status(200).json(withCounts);
         } catch (error) {
             logger.error(`Error fetching user chats for ${currentUserId}: ${error.message}`, error);
             res.status(500).json({ message: 'Server error while fetching chats.' });
