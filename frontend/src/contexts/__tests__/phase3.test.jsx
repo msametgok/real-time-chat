@@ -244,7 +244,9 @@ describe('newChat', () => {
         const { result } = await renderChats();
 
         await act(async () => {
-            const { unreadCount, ...withoutCount } = chatFixture('chat-3', '2026-07-19T12:00:00Z');
+            // Destructured only to omit it from the payload - the underscore
+            // matches eslint's varsIgnorePattern for a deliberately unused var.
+            const { unreadCount: _unreadCount, ...withoutCount } = chatFixture('chat-3', '2026-07-19T12:00:00Z');
             newChatHandler(withoutCount);
         });
 

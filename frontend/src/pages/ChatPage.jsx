@@ -1,5 +1,4 @@
 import React from 'react';
-//import { ChatProvider } from '../contexts/ChatContext';
 import { useChat } from '../hooks/useChat';
 import ChatList from '../components/chat/ChatList';
 import ChatWindow from '../components/chat/ChatWindow';

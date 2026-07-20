@@ -78,7 +78,6 @@ messageSchema.post('save', async function(doc, next) {
         next();
     } catch (error) {
         logger.error(`Error updating latestMessage in Chat from Message post-save hook for message ${doc._id}: ${error.message}`, error);
-        //console.error(`Error updating latestMessage in Chat from Message post-save hook for message ${doc._id}: ${error.message}`, error);
         next(error);
     }
 });
