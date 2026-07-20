@@ -129,6 +129,30 @@ const api = {
      * @param {{limit?: number, page?: number}} [options]
      * @returns {Promise<{users: Array, currentPage: number, totalPages: number, totalResults: number}>}
      */
+    /**
+     * Remove a chat from your list. For a 1-on-1 this is a per-user soft
+     * delete - the other participant keeps the conversation. For a group it
+     * means leaving it.
+     */
+    async deleteChat(chatId, token) {
+        return this.request(`/api/chat/${chatId}`, 'DELETE', null, token);
+    },
+
+    /** The logged-in user's own profile, including email. */
+    async getMyProfile(token) {
+        return this.request('/api/users/profile', 'GET', null, token);
+    },
+
+    /**
+     * Update own profile. Send only the fields being changed; `password`
+     * additionally requires `currentPassword`. `avatar` is a URL - pass an
+     * empty string to remove it.
+     * @returns {Promise<{message: string, user: Object}>}
+     */
+    async updateMyProfile(updates, token) {
+        return this.request('/api/users/profile', 'PUT', updates, token);
+    },
+
     async searchUsers(keyword, token, { limit = 10, page = 1 } = {}) {
         const params = new URLSearchParams({ limit: String(limit), page: String(page) });
         // Only send `keyword` when there is one: the server treats a missing

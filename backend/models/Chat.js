@@ -43,7 +43,21 @@ const chatSchema = new mongoose.Schema({
     pairKey: {
         type: String,
         default: null
-    }
+    },
+    /**
+     * Per-user soft delete. "Delete chat" hides the conversation for the user
+     * who asked and nobody else - a 1-on-1 delete used to remove the chat and
+     * every message for BOTH participants, silently destroying the other
+     * person's history.
+     *
+     * getUserChats filters on this. The Message post-save hook clears it, so a
+     * new message brings the chat back for everyone who had hidden it. Once
+     * every participant has hidden it, deleteOrLeaveChat removes it for real.
+     */
+    deletedFor: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }]
 }, { timestamps: true
 
 });

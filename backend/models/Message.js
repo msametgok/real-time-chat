@@ -67,7 +67,13 @@ messageSchema.post('save', async function(doc, next) {
         const Chat = mongoose.model('Chat');
         const chat = await Chat.findByIdAndUpdate(
             doc.chat,
-            { latestMessage: doc._id, updatedAt: Date.now() },
+            {
+                latestMessage: doc._id,
+                updatedAt: Date.now(),
+                // A new message makes the chat relevant again for anyone who
+                // had soft-deleted it, so un-hide it for everyone at once.
+                deletedFor: []
+            },
             { new: true }
         ).select('participants');
 

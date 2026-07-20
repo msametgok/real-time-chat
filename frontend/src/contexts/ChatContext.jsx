@@ -102,6 +102,11 @@ export function ChatProvider({ children }) {
   const chatsRef = useRef(chats);
   chatsRef.current = chats;
 
+  // Same again for the open chat, so callbacks can ask "is this the one I'm
+  // looking at?" without taking activeChat as a dependency.
+  const activeChatRef = useRef(activeChat);
+  activeChatRef.current = activeChat;
+
   const [isLoadingChats, setIsLoadingChats] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [chatError, setChatError] = useState(null);
@@ -906,6 +911,37 @@ const handleMessageDeliveryUpdate = useCallback(
     [isAuthenticated, user?.token, fetchChats, selectChat]
   );
 
+  // Remove a chat from the sidebar. Soft delete for 1-on-1 (the other person
+  // keeps it), leave for a group.
+  //
+  // The local state is updated only AFTER the server confirms: unlike the
+  // unread badge there is no repair path here, and optimistically removing a
+  // chat that the server refused would hide a live conversation until the next
+  // refetch. Throws so the caller can show the failure - not into `chatError`,
+  // which ChatList renders instead of the sidebar.
+  const deleteChat = useCallback(
+    async chatId => {
+      if (!isAuthenticated || !user?.token) throw new Error('User not authenticated');
+      if (!chatId) return;
+
+      await api.deleteChat(chatId, user.token);
+
+      setChats(prev => prev.filter(c => c._id !== chatId));
+
+      // Stop listening to a room we are no longer in, and forget the
+      // optimistic join bookkeeping so a re-created chat can join cleanly.
+      socketService.leaveChat(chatId);
+      joinedChatsRef.current.delete(chatId);
+
+      // Only clear the open conversation if it is the one being removed.
+      if (activeChatRef.current?._id === chatId) {
+        setActiveChat(null);
+        setMessages([]);
+      }
+    },
+    [isAuthenticated, user?.token]
+  );
+
   // Thin pass-through so components never handle the token themselves (api.js
   // takes it per call). Throws on failure like the create helpers - the caller
   // owns how to show it.
@@ -933,6 +969,7 @@ const handleMessageDeliveryUpdate = useCallback(
     createOneOnOneChatAPI,
     createGroupChatAPI,
     searchUsers,
+    deleteChat,
     hasConnected,
     connectionError,
     realtimeError,

@@ -292,7 +292,13 @@ exports.getUserChats = [
 
             logger.info(`Fetching chats for user ${currentUserId} from DB.`);
             // Fetch chats from DB where the current user is a participant
-            const chats = await Chat.find({ participants: currentUserId })
+            // `$ne` on an array field excludes chats this user has soft-deleted.
+            // The Message post-save hook clears deletedFor, so a new message
+            // brings a hidden chat back.
+            const chats = await Chat.find({
+                participants: currentUserId,
+                deletedFor: { $ne: currentUserId }
+            })
                 .populate('participants', 'username email avatar') // Populate participant details
                 .populate({ // Populate latest message and its sender
                     path: 'latestMessage',
@@ -448,11 +454,42 @@ exports.deleteOrLeaveChat = [
                     return res.status(200).json({ message: 'Successfully left the group chat.' });
                 }
             } else {
-                // For 1-on-1 chats, deleting it means deleting for both users.
-                await Message.deleteMany({ chat: chatId }); // chatId (string) will be cast
-                await Chat.findByIdAndDelete(chatId);       // chatId (string) will be cast
-                await invalidateChatCache(initialParticipantsStrings);
-                return res.status(200).json({ message: '1-on-1 chat deleted successfully.' });
+                // Soft delete: hide the chat for THIS user only.
+                //
+                // This used to delete the chat and every message outright, for
+                // both participants - one person tidying their sidebar wiped
+                // the other's history with no warning and no way back.
+                //
+                // Nothing is broadcast to the other participant: the chat is
+                // untouched for them by design.
+                // Compared as strings throughout (gotcha 9). `currentUserId` is
+                // a string off the JWT, so pushing it and then calling
+                // .equals() on the result would throw - Mongoose happens to
+                // cast on save, but the in-memory array is mixed until then.
+                const hiddenForIds = chat.deletedFor.map(id => id.toString());
+                if (!hiddenForIds.includes(currentUserId.toString())) {
+                    chat.deletedFor.push(currentUserId);
+                    hiddenForIds.push(currentUserId.toString());
+                }
+
+                // Once everyone has hidden it, nobody can reach it again - a
+                // new message would be the only way back, and there is no UI to
+                // send one. Reclaim the storage.
+                const everyoneHidden = chat.participants.every(p =>
+                    hiddenForIds.includes(p.toString())
+                );
+
+                if (everyoneHidden) {
+                    await Message.deleteMany({ chat: chatId });
+                    await Chat.findByIdAndDelete(chatId);
+                    await invalidateChatCache(initialParticipantsStrings);
+                    return res.status(200).json({ message: 'Chat deleted for all participants.' });
+                }
+
+                await chat.save();
+                // Only the deleter's cached chat list is now wrong.
+                await invalidateChatCache([currentUserId]);
+                return res.status(200).json({ message: 'Chat removed from your list.' });
             }
         } catch (error) {
             logger.error(`Error deleting/leaving chat ${chatId}: ${error.message}`, error);

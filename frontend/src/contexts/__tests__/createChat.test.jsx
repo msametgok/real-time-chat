@@ -35,6 +35,7 @@ vi.mock('../../services/api', () => ({
         createOneOnOneChat: vi.fn(),
         createGroupChat: vi.fn(),
         searchUsers: vi.fn(),
+        deleteChat: vi.fn(),
     }
 }));
 
@@ -44,6 +45,7 @@ vi.mock('../../hooks/useAuth', () => ({
 }));
 
 import api from '../../services/api';
+import socketService from '../../services/socket';
 import { ChatProvider } from '../ChatContext';
 import { useChat } from '../../hooks/useChat';
 
@@ -145,5 +147,84 @@ describe('creating a chat', () => {
         await act(async () => { users = await result.current.searchUsers(''); });
 
         expect(users).toEqual([]);
+    });
+});
+
+describe('removing a chat', () => {
+    const EXISTING = {
+        _id: 'chat-1',
+        isGroupChat: false,
+        displayChatName: 'bob',
+        participants: [{ _id: 'user-1' }, { _id: 'user-2' }],
+        updatedAt: '2026-07-20T10:00:00Z'
+    };
+
+    const withChat = async () => {
+        api.getUserChats.mockResolvedValue([EXISTING]);
+        const rendered = renderHook(() => useChat(), { wrapper });
+        await waitFor(() => expect(rendered.result.current.chats).toHaveLength(1));
+        return rendered;
+    };
+
+    it('drops the chat from the sidebar once the server confirms', async () => {
+        const { result } = await withChat();
+        api.deleteChat.mockResolvedValue({ message: 'Chat removed from your list.' });
+
+        await act(async () => { await result.current.deleteChat('chat-1'); });
+
+        expect(api.deleteChat).toHaveBeenCalledWith('chat-1', 'tok');
+        expect(result.current.chats).toHaveLength(0);
+    });
+
+    it('leaves the room and forgets the join bookkeeping', async () => {
+        const { result } = await withChat();
+        api.deleteChat.mockResolvedValue({});
+
+        await act(async () => { await result.current.deleteChat('chat-1'); });
+
+        expect(socketService.leaveChat).toHaveBeenCalledWith('chat-1');
+    });
+
+    it('closes the conversation when the open chat is the one removed', async () => {
+        const { result } = await withChat();
+        api.deleteChat.mockResolvedValue({});
+        await act(async () => { await result.current.selectChat('chat-1'); });
+        expect(result.current.activeChat?._id).toBe('chat-1');
+
+        await act(async () => { await result.current.deleteChat('chat-1'); });
+
+        expect(result.current.activeChat).toBeNull();
+        expect(result.current.messages).toEqual([]);
+    });
+
+    // Removing a chat you are not looking at must not close the one you are.
+    it('leaves the open conversation alone when a different chat is removed', async () => {
+        api.getUserChats.mockResolvedValue([
+            EXISTING,
+            { ...EXISTING, _id: 'chat-2', displayChatName: 'carol' }
+        ]);
+        const { result } = renderHook(() => useChat(), { wrapper });
+        await waitFor(() => expect(result.current.chats).toHaveLength(2));
+        api.deleteChat.mockResolvedValue({});
+
+        await act(async () => { await result.current.selectChat('chat-2'); });
+        await act(async () => { await result.current.deleteChat('chat-1'); });
+
+        expect(result.current.activeChat?._id).toBe('chat-2');
+        expect(result.current.chats.map(c => c._id)).toEqual(['chat-2']);
+    });
+
+    // No optimistic removal: hiding a chat the server refused to remove would
+    // conceal a live conversation until the next refetch.
+    it('keeps the chat when the server refuses', async () => {
+        const { result } = await withChat();
+        api.deleteChat.mockRejectedValue(new Error('Access Denied'));
+
+        await expect(
+            act(async () => { await result.current.deleteChat('chat-1'); })
+        ).rejects.toThrow('Access Denied');
+
+        expect(result.current.chats).toHaveLength(1);
+        expect(result.current.chatError).toBeNull();
     });
 });
