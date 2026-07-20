@@ -237,17 +237,25 @@ export function ChatProvider({ children }) {
       // anyone still typing re-announces within ~2s.
       setTypingUsers({});
       if (sel) {
-        // Opening a chat clears its badge. handleNewMessage skips the increment
-        // while a chat is active, so this only has to cover what accumulated
-        // before the switch.
-        setChats(prev =>
-          prev.map(c => (c._id === chatId ? { ...c, unreadCount: 0 } : c))
-        );
-        // Clear the badge on the SERVER too, for the whole chat. ChatWindow
-        // marks only the page it has loaded, so without this the next
-        // fetchChats would recompute a count from messages the user never
-        // scrolled back to and the badge would reappear on reload.
-        socketService.markChatAsRead(chatId);
+        // Clear the badge on the SERVER, for the whole chat. ChatWindow marks
+        // only the page it has loaded, so without this the next fetchChats
+        // would recompute a count from messages the user never scrolled back
+        // to and the badge would reappear on reload.
+        //
+        // Emit FIRST and only zero the badge locally if it actually went out.
+        // The count now comes from the server, so clearing optimistically on a
+        // dropped emit just hides the badge until the next fetch brings it
+        // straight back - and the mid-session disconnect window is exactly when
+        // someone clicks a chat. Gotcha 10: no optimistic bookkeeping without a
+        // repair path. The repair here is the re-emit in the reconnect effect.
+        const cleared = socketService.markChatAsRead(chatId);
+        if (cleared) {
+          // handleNewMessage skips the increment while a chat is active, so
+          // this only has to cover what accumulated before the switch.
+          setChats(prev =>
+            prev.map(c => (c._id === chatId ? { ...c, unreadCount: 0 } : c))
+          );
+        }
         await fetchMessages(chatId);
       }
     },
@@ -763,10 +771,26 @@ const handleMessageDeliveryUpdate = useCallback(
       currentChats.forEach(c => socketService.joinChat(c._id));
       joinedChatsRef.current = new Set(currentChats.map(c => c._id));
 
+      // Repair for a markChatAsRead that was dropped while we were offline:
+      // opening a chat during an outage leaves its unread state untouched on
+      // the server.
+      if (activeChatId) socketService.markChatAsRead(activeChatId);
+
       // Then pull anything we missed while we were away.
       try {
         await refetchChats?.();
-        if (activeChatId) await refetchMessages?.(activeChatId);
+
+        if (activeChatId) {
+          // The refetch races the emit above - they travel over different
+          // transports, so the server may answer the HTTP fetch before it
+          // handles the socket event and hand back the count we just cleared.
+          // The active chat is being read by definition, so pin it to 0 rather
+          // than depending on that ordering.
+          setChats(prev =>
+            prev.map(c => (c._id === activeChatId ? { ...c, unreadCount: 0 } : c))
+          );
+          await refetchMessages?.(activeChatId);
+        }
       } catch (err) {
         console.error('ChatContext: resync after reconnect failed', err);
       }

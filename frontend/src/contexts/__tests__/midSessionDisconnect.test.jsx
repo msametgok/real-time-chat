@@ -23,7 +23,7 @@ vi.mock('../../services/socket', () => ({
         typingStart: vi.fn(),
         typingStop: vi.fn(),
         markMessagesAsRead: vi.fn(),
-        markChatAsRead: vi.fn(),
+        markChatAsRead: vi.fn(() => true),
         messageDeliveredToClient: vi.fn(),
         onNewMessage: vi.fn(), offNewMessage: vi.fn(),
         onNewChat: vi.fn(), offNewChat: vi.fn(),
@@ -119,6 +119,31 @@ describe('mid-session socket loss', () => {
 
         await waitFor(() => expect(result.current.connectionError).toBeTruthy());
         await waitFor(() => expect(socketService.connect).toHaveBeenCalled());
+    });
+
+    // The repair half of the dropped-emit problem: a markChatAsRead that never
+    // went out while the socket was down has to be flushed once it returns, or
+    // the chat the user actually read keeps its unread state on the server.
+    it('re-sends markChatAsRead for the active chat on reconnect', async () => {
+        const { result } = await renderConnected();
+
+        await act(async () => { await result.current.selectChat(CHAT._id); });
+        socketService.markChatAsRead.mockClear();
+
+        act(() => fakeSocket.fire('disconnect', 'transport close'));
+        await act(async () => { fakeSocket.fire('connect'); });
+
+        expect(socketService.markChatAsRead).toHaveBeenCalledWith(CHAT._id);
+    });
+
+    it('does not re-send markChatAsRead when no chat is open', async () => {
+        await renderConnected();
+        socketService.markChatAsRead.mockClear();
+
+        act(() => fakeSocket.fire('disconnect', 'transport close'));
+        await act(async () => { fakeSocket.fire('connect'); });
+
+        expect(socketService.markChatAsRead).not.toHaveBeenCalled();
     });
 
     // Logout calls socketService.disconnect(), which fires this same event.

@@ -16,7 +16,8 @@ vi.mock('../../services/socket', () => ({
         typingStart: vi.fn(),
         typingStop: vi.fn(),
         markMessagesAsRead: vi.fn(),
-        markChatAsRead: vi.fn(),
+        // Mirrors the real emitter: returns whether the event went out.
+        markChatAsRead: vi.fn(() => true),
         messageDeliveredToClient: vi.fn(),
         onNewMessage: vi.fn(cb => { newMessageHandler = cb; }),
         offNewMessage: vi.fn(),
@@ -171,6 +172,25 @@ describe('unread badge counting', () => {
         await act(async () => { await result.current.selectChat(OTHER_ID); });
 
         expect(socketService.markChatAsRead).toHaveBeenCalledWith(OTHER_ID);
+    });
+
+    // Gotcha 10: optimistic bookkeeping needs a repair path. The count now
+    // comes from the server, so zeroing the badge after a DROPPED emit just
+    // hides it until the next fetchChats brings it straight back - and the
+    // mid-session disconnect window is exactly when someone clicks a chat.
+    it('keeps the badge when the emit was dropped', async () => {
+        const { result } = await renderChats();
+
+        await act(async () => {
+            newMessageHandler(incoming(OTHER_ID, 'user-2', 'one'));
+            newMessageHandler(incoming(OTHER_ID, 'user-2', 'two'));
+        });
+        expect(unreadFor(result, OTHER_ID)).toBe(2);
+
+        socketService.markChatAsRead.mockReturnValueOnce(false); // socket down
+        await act(async () => { await result.current.selectChat(OTHER_ID); });
+
+        expect(unreadFor(result, OTHER_ID)).toBe(2);
     });
 
     it('does not re-emit when the chat is already active', async () => {

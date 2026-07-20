@@ -143,7 +143,9 @@ class SocketService {
   typingStop(chatId) { this.emit('typingStop', { chatId }); }
   markMessagesAsRead(chatId, messageIds) { this.emit('markMessagesAsRead', { chatId, messageIds }); }
   // Clears the whole chat, including messages older than the loaded page.
-  markChatAsRead(chatId) { this.emit('markChatAsRead', { chatId }); }
+  // Returns whether it actually went out: the caller zeroes the badge
+  // optimistically and must not do so if the emit was dropped.
+  markChatAsRead(chatId) { return this.emit('markChatAsRead', { chatId }); }
   messageDeliveredToClient(messageId, chatId) { this.emit('messageDeliveredToClient', { messageId, chatId }); }
 
   // ——— Listener registration ———
