@@ -29,20 +29,20 @@ const api = {
                 headers: token ? { Authorization: `Bearer ${token}` } : {}
             };
 
-            // Make the request using axios instance
-            console.log(`Making ${method} request to ${API_URL}${endpoint}`, {
-                data,
-                token: token ? '[REDACTED]' : null
-            });
-
+            // Deliberately no logging of `data` or `response.data` here. The
+            // request body carries the plaintext password on login/register,
+            // and responses carry decrypted message content - both ended up in
+            // the browser console, where they persist and travel with any
+            // screenshot or screen share. The token was redacted; nothing else
+            // was. If you need to inspect traffic, use the Network tab, which
+            // at least doesn't retain it in the log.
             const response = await axiosInstance(config);
-
-            console.log(`Response from ${API_URL}${endpoint}:`, response.data);
 
             return response.data;
 
         } catch (error) {
             const errorMessage = error.response?.data?.message || error.message || `HTTP error at ${endpoint}`;
+            // Message only - never the body that caused it.
             console.error(`API error at ${method} ${API_URL}${endpoint}:`, errorMessage);
             const errToThrow = new Error(errorMessage);
             errToThrow.response = error.response; 
