@@ -19,7 +19,7 @@ Goal: fix the silent breakage first, then collapse the duplication — in that o
 | 2 — Delete `chatListUpdate`, fix reconciliation | **DONE** | `caa2896` |
 | 3 — Remaining correctness | **DONE** | `57dee7e` (typing) + `d951022` (race) + `844ced6` (newChat) + `022e7af` (multi-tab) |
 | 4 — Shared helpers | **DONE** — 6 of 6 | `d579a42` `2973431` `e37863c` `49d28e3` `52cca36` `2a0cb55` `09b7ce7` |
-| 5 — Cleanup | in progress — security pair done | `714005e` (console leak) + `56f81f7` (typing authz) |
+| 5 — Cleanup | **DONE** | `714005e` `56f81f7` `ded456e` `10036c1` `6061754` `bade732` |
 
 A test suite now exists (`fdce6b0`) — jest on the backend, vitest on the frontend.
 99 tests green as of `022e7af`. The "no test suite exists" note under Verification
@@ -29,6 +29,11 @@ that table are still the only way to verify realtime behavior.
 **Phases 0–2 have not yet been verified in the real app** — only by unit test.
 The ack-before-broadcast ordering and the unread badge in particular want a
 two-profile pass.
+
+**All five phases have landed.** What remains is verification debt, not work:
+the two-browser pass is still owed for Phases 0–2 and for the two client-side
+Phase 3 behaviours. Everything else has been exercised against the live server
+with scripted Socket.IO clients.
 
 **Phase 3 is half-verified.** The backend half was driven against the live stack
 with scripted Socket.IO clients (typing wire format + Redis key naming, `newChat`
@@ -169,7 +174,26 @@ Deliberately after correctness, so we extract the *fixed* shape.
 
 ---
 
-## Phase 5 — Cleanup
+## Phase 5 — Cleanup — **DONE**
+
+> Like Phase 4, this was not the cosmetic pass the heading suggests. The
+> "cleanup" list contained two security bugs, two silent hangs, and a data
+> integrity race. Items below are struck through as they landed; notes record
+> where the plan's own instructions turned out to be wrong.
+>
+> **Three things the plan got wrong, worth remembering:**
+> - `api.js` was said to leak *message content*. It also logged the **plaintext
+>   password** on every login and register.
+> - "unique index on sorted participants" **cannot work**: `participants` is an
+>   array, so the index is multikey and `unique` applies per element — it would
+>   cap every user at one 1-on-1 chat. Needed a scalar `pairKey`.
+> - "Reject on all, or add a timeout" for the connect promise — reject-on-all is
+>   wrong, since socket.io retries underneath and a blip would become a hard
+>   failure.
+>
+> **Still open, deliberately:** `chatError` and `statusError` are emitted by the
+> server and consumed by nobody. Same shape as the `messageError` gap Phase 1b
+> fixed. The client seam was kept rather than deleted so this can be closed.
 
 - **Double cache invalidation:** `Message.js:65-77` post-save hook and `chatEvents.js:176` both invalidate the same participants. Keep the hook, drop the explicit call.
 - **Phantom `onlineStatus`/`lastSeen`:** not fields on the User model (presence is Redis-only) yet `.select()`ed at 9 sites (`chatController.js:80,100,160,161,194,296` + userController). Cosmetic but misleading — strip. *Partly done in Phase 4:* `issueAuthResponse` (`e37863c`) dropped it from the register/login response, where it had always serialised to `undefined`. The `.select()` sites remain.
