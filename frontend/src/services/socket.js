@@ -182,11 +182,9 @@ class SocketService {
   onMessageSentAck(cb) { this._registerListener('messageSentAck', cb); }
   offMessageSentAck(cb) { this._unregisterListener('messageSentAck', cb); }
 
-  // chatError and statusError are kept although nothing consumes them yet.
-  // The server really does emit both - a failed joinChat, a rejected
-  // markMessagesAsRead - and they currently vanish. That is the same gap
-  // messageError had before it was wired up: an error channel the client never
-  // listens on. Deleting the seam would only make it harder to close.
+  // All three error channels are consumed by ChatContext. chatError is not
+  // only a message: it also repairs joinedChatsRef, which would otherwise keep
+  // claiming we are in a room the server refused us.
   onChatError(cb) { this._registerListener('chatError', cb); }
   offChatError(cb) { this._unregisterListener('chatError', cb); }
 

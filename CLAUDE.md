@@ -86,7 +86,7 @@ src/
 - **One `module.exports` per file.** A nested second one silently shadowed an entire handler here — it registered nothing and threw no error.
 - Backend logging via **winston** (`config/logger.js`), not `console.*`.
 - Socket acks are **separate emit-back events** (`messageSentAck`, `joinedChat`, `markMessagesAsReadAck`), not Socket.IO callback acks. Follow the existing pattern unless deliberately migrating.
-- Socket errors go to `chatError` / `messageError` / `statusError`.
+- Socket errors go to `chatError` / `messageError` / `statusError`. All three are consumed in `ChatContext`; `chatError`/`statusError` surface through the `RealtimeNotice` banner. A new error event needs a listener there or it silently vanishes — that was true of all three at some point.
 - 4-space indent backend, 4-space JSX frontend. Match the surrounding file.
 - No TypeScript — don't introduce it without asking.
 - **Socket handlers are tested by injecting a fake `deps` object** — no live Mongo, Redis, or Socket.IO server. See `backend/socketHandlers/__tests__/statusEvents.test.js` for the `buildHarness()` pattern and the `lean()`/`selectLean()` helpers that stand in for Mongoose chaining. Reuse it for new handlers.
@@ -105,6 +105,7 @@ These have each caused a real bug — check for them when editing:
 7. **`socket.to(room)` excludes the sender; `io.to(room)` includes it.** Picking the wrong one causes either a missing update or a double-apply. Also note `socket.to()` does **not** require room membership — always verify the user is a participant before broadcasting on their behalf.
 8. **`Message` post-save hook already updates `Chat.latestMessage` and invalidates cache.** Don't invalidate again at the call site.
 9. Compare Mongo IDs with `.toString()` consistently — mixing raw ObjectIds and strings in `.includes()` fails silently.
+10. **Optimistic bookkeeping must be undone on the error path.** `joinedChatsRef` records a room the moment `joinChat` is emitted. When the server rejected the join and nothing repaired the set, the join effect saw "already joined" forever and that chat went dark for the whole session. Any "have I done X yet" ref needs a matching delete in the failure handler.
 
 ## Verifying changes
 
@@ -116,6 +117,8 @@ the backend log together. Check the flow from both sides — sender and receiver
 - Send a message → correct order, ticks progress sent → delivered → read.
 - Send while the receiver is disconnected, then reconnect → message appears **without** a reload.
 - Trigger the failure path (stop MongoDB mid-send) → the UI shows a failed state, not a permanent spinner.
+
+Scripted `socket.io-client` probes cover what the browser can't easily reach (rejected joins, auth, races). Two traps, both of which have produced fake failures here: **write the probe outside `backend/`** — nodemon watches that tree and restarts the server underneath a running probe — and **remove the listener when a `waitFor` times out**, or the stale `once` swallows the next assertion's event. Socket auth signs `{ userId }`, not `{ id }`.
 
 **Ask before committing.** Don't run `git commit` unprompted, even when the work is finished and tested — summarize what would be staged and wait. Commit one logical change at a time so regressions bisect cleanly.
 

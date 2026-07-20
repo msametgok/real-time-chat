@@ -109,6 +109,28 @@ export function ChatProvider({ children }) {
   const [typingUsers, setTypingUsers] = useState({});
   const [hasConnected, setHasConnected] = useState(false);
 
+  // Transient realtime failures (chatError / statusError). Separate from
+  // `chatError`, which ChatList renders *instead of* the sidebar - routing a
+  // one-off socket failure into that state would blank the chat list. This one
+  // is a banner: it never replaces content.
+  //
+  // `key` is bumped on every set so an identical repeated message still
+  // restarts the auto-dismiss timer instead of being swallowed as "no change".
+  const [realtimeError, setRealtimeError] = useState(null);
+  const realtimeErrorKeyRef = useRef(0);
+
+  const raiseRealtimeError = useCallback(message => {
+    realtimeErrorKeyRef.current += 1;
+    setRealtimeError({ message, key: realtimeErrorKeyRef.current });
+  }, []);
+
+  const dismissRealtimeError = useCallback(() => setRealtimeError(null), []);
+
+  // Which chat rooms we believe we have joined. Declared here rather than next
+  // to the join effect below because handleChatError has to repair it: a failed
+  // join must not leave the id in this set.
+  const joinedChatsRef = useRef(new Set());
+
   // 1) Fetch all chats
   const fetchChats = useCallback(async () => {
     if (!isAuthenticated || !user?.token) {
@@ -551,6 +573,24 @@ const handleMessageDeliveryUpdate = useCallback(
     setMessagesError(message || 'Failed to send message.');
   }, []);
 
+  // A joinChat/leaveChat was rejected. Two things have to happen, and the
+  // bookkeeping matters more than the message: joinedChatsRef optimistically
+  // records the id at emit time, so if we leave a failed join in the set the
+  // effect below sees "already joined" and never retries. The room stays
+  // unjoined for the whole session and that chat silently receives no realtime
+  // updates until a reload. Drop the id so the next chats change re-attempts.
+  const handleChatError = useCallback(({ chatId, message }) => {
+    if (chatId) joinedChatsRef.current.delete(chatId);
+    raiseRealtimeError(message || 'Lost access to a chat. Reconnecting...');
+  }, [raiseRealtimeError]);
+
+  // markMessagesAsRead was rejected. Nothing to roll back - read state is owned
+  // by the server and we never applied it optimistically - but the user should
+  // know their read receipts are not going out.
+  const handleStatusError = useCallback(({ message }) => {
+    raiseRealtimeError(message || 'Could not update message status.');
+  }, [raiseRealtimeError]);
+
   // â”€â”€â”€ 5) REGISTER HANDLERS â”€â”€â”€
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -563,6 +603,8 @@ const handleMessageDeliveryUpdate = useCallback(
     socketService.onUserConnectedToChat(handleUserConnectedToChat);
     socketService.onMessageSentAck(handleMessageSentAck);
     socketService.onMessageError(handleMessageError);
+    socketService.onChatError(handleChatError);
+    socketService.onStatusError(handleStatusError);
 
     return () => {
       socketService.offNewMessage(handleNewMessage);
@@ -573,6 +615,8 @@ const handleMessageDeliveryUpdate = useCallback(
       socketService.offUserConnectedToChat(handleUserConnectedToChat);
       socketService.offMessageSentAck(handleMessageSentAck);
       socketService.offMessageError(handleMessageError);
+      socketService.offChatError(handleChatError);
+      socketService.offStatusError(handleStatusError);
     };
   }, [
     isAuthenticated,
@@ -583,7 +627,9 @@ const handleMessageDeliveryUpdate = useCallback(
     handleMessageDeliveryUpdate,
     handleUserConnectedToChat,
     handleMessageSentAck,
-    handleMessageError
+    handleMessageError,
+    handleChatError,
+    handleStatusError
   ]);
 
   // â”€â”€â”€ 6) CONNECT/DISCONNECT SOCKET â”€â”€â”€
@@ -634,8 +680,6 @@ const handleMessageDeliveryUpdate = useCallback(
   }, [isAuthenticated, user?.token, hasConnected, connectAttempt]);
 
   // â”€â”€â”€ 6.5) JOIN ALL CHATS ON CONNECT â”€â”€â”€
-  const joinedChatsRef = useRef(new Set());
-
   useEffect(() => {
     if (!hasConnected) return;
 
@@ -811,6 +855,8 @@ const handleMessageDeliveryUpdate = useCallback(
     createGroupChatAPI,
     hasConnected,
     connectionError,
+    realtimeError,
+    dismissRealtimeError,
     presence,
     sendMessage,
     retryMessage,

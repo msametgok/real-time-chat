@@ -191,9 +191,24 @@ Deliberately after correctness, so we extract the *fixed* shape.
 >   wrong, since socket.io retries underneath and a blip would become a hard
 >   failure.
 >
-> **Still open, deliberately:** `chatError` and `statusError` are emitted by the
-> server and consumed by nobody. Same shape as the `messageError` gap Phase 1b
-> fixed. The client seam was kept rather than deleted so this can be closed.
+> **Closed after Phase 5.** `chatError` and `statusError` are now consumed by
+> `ChatContext`. The message was the smaller half: a rejected `joinChat` also
+> left its id in `joinedChatsRef`, which records the join optimistically at emit
+> time. The join effect then saw "already joined" and never retried, so that
+> chat received **no realtime updates for the rest of the session** — a silent
+> failure that only a reload cleared. `handleChatError` deletes the id so the
+> next `chats` change re-attempts it.
+>
+> Errors now surface through `RealtimeNotice`, a banner deliberately separate
+> from ChatList's `chatError` state: that one renders *instead of* the sidebar,
+> so routing a one-off socket rejection into it would blank the chat list.
+> `connectionError` was rendered here too — it had the same never-displayed
+> problem. `messagesError` is still unrendered, but failed sends already show a
+> per-bubble failed state with Retry, which is the better surface.
+>
+> Verified live: 5/5 on a probe asserting the server emits both events *and*
+> that a rejected join carries `chatId` — without it the bookkeeping repair has
+> nothing to key on.
 
 - **Double cache invalidation:** `Message.js:65-77` post-save hook and `chatEvents.js:176` both invalidate the same participants. Keep the hook, drop the explicit call.
 - **Phantom `onlineStatus`/`lastSeen`:** not fields on the User model (presence is Redis-only) yet `.select()`ed at 9 sites (`chatController.js:80,100,160,161,194,296` + userController). Cosmetic but misleading — strip. *Partly done in Phase 4:* `issueAuthResponse` (`e37863c`) dropped it from the register/login response, where it had always serialised to `undefined`. The `.select()` sites remain.

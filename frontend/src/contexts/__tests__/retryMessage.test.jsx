@@ -23,6 +23,8 @@ vi.mock('../../services/socket', () => ({
         onUserStatusUpdate: vi.fn(), offUserStatusUpdate: vi.fn(),
         onMessageSentAck: vi.fn(), offMessageSentAck: vi.fn(),
         onMessageError: vi.fn(), offMessageError: vi.fn(),
+        onChatError: vi.fn(), offChatError: vi.fn(),
+        onStatusError: vi.fn(), offStatusError: vi.fn(),
     }
 }));
 

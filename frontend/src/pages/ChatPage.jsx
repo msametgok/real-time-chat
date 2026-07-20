@@ -4,6 +4,7 @@ import { useChat } from '../hooks/useChat';
 import ChatList from '../components/chat/ChatList';
 import ChatWindow from '../components/chat/ChatWindow';
 import UserProfileCard from '../components/user/UserProfileCard';
+import RealtimeNotice from '../components/common/RealtimeNotice';
 
 // Wraps chat list and window panels inside ChatProvider
 function ChatPage() {
@@ -17,7 +18,10 @@ function ChatAppContent() {
   const { activeChat } = useChat();
 
   return (
-    <div className="flex h-screen antialiased text-gray-800 bg-slate-900">
+    <div className="relative flex h-screen antialiased text-gray-800 bg-slate-900">
+      {/* Overlays the panels below - `relative` on the parent anchors it */}
+      <RealtimeNotice />
+
       {/* Chat List Panel (visible if no activeChat or on md+) */}
       <div
         className={`flex flex-col bg-slate-800 flex-shrink-0 w-full md:w-64 lg:w-80 xl:w-96 py-8 pl-6 pr-2
