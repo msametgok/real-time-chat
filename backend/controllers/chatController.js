@@ -98,44 +98,70 @@ exports.createOneOnOneChat = [
             }
 
             const participants = [ currentUserId, otherUserId ].sort();
+            const pairKey = Chat.buildPairKey(participants);
 
-            // Check if chat already exists
-            let chat = await Chat.findOne({
-                isGroupChat: false,
-                participants: { $all: participants, $size: 2 }
-            })
+            // Find-or-create in ONE atomic operation. This was previously a
+            // findOne followed by a save: two requests arriving together both
+            // saw "no chat" and both created one, leaving the pair with
+            // duplicate conversations and messages split between them. The
+            // unique partial index on pairKey is what makes this safe - upsert
+            // alone still races, it just loses more rarely.
+            const result = await Chat.findOneAndUpdate(
+                { pairKey },
+                { $setOnInsert: { isGroupChat: false, participants, pairKey } },
+                {
+                    upsert: true,
+                    new: true,
+                    setDefaultsOnInsert: true,
+                    // Returns { value, lastErrorObject, ok } instead of the bare
+                    // document, so we can tell insert from match and keep the
+                    // status code and socket emit correct. This is Mongoose 8's
+                    // name for it - the old `rawResult` is silently ignored
+                    // here, which yields an undefined `.value`.
+                    includeResultMetadata: true
+                }
+            );
 
-            if (chat) {
-                // If chat exists, return it
-                chat = await Chat.findById(chat._id)
-                    .populate('participants', 'username email avatar onlineStatus')
+            const created = !result.lastErrorObject?.updatedExisting;
+            const chatId = result.value._id;
+
+            const populatedChat = await Chat.findById(chatId)
+                .populate('participants', 'username email avatar')
+                .populate({
+                    path: 'latestMessage',
+                    populate: { path: 'sender', select: 'username avatar' }
+                });
+
+            const formatted = formatChatResponse(populatedChat, currentUserId);
+
+            if (!created) {
+                return res.status(200).json({ message: 'Chat already exists', chat: formatted });
+            }
+
+            await invalidateChatCache(participants);
+            emitNewChat(populatedChat);
+            res.status(201).json({ message: 'Chat created successfully', chat: formatted });
+        } catch (error) {
+            // The loser of a genuine race: the index rejected the duplicate
+            // insert. The chat exists now, so answer as if we had found it.
+            if (error.code === 11000) {
+                const existing = await Chat.findOne({
+                    pairKey: Chat.buildPairKey([currentUserId, otherUserId].sort())
+                })
+                    .populate('participants', 'username email avatar')
                     .populate({
                         path: 'latestMessage',
                         populate: { path: 'sender', select: 'username avatar' }
                     });
 
-                const formatted = formatChatResponse(chat, currentUserId);
-                return res.status(200).json({message: 'Chat already exists', chat: formatted });
+                if (existing) {
+                    return res.status(200).json({
+                        message: 'Chat already exists',
+                        chat: formatChatResponse(existing, currentUserId)
+                    });
+                }
             }
 
-            // If chat does not exist create new  1-on-1 chat
-
-            const newChat = new Chat({
-                isGroupChat: false,
-                participants
-            });
-
-            await newChat.save();
-
-            const populatedChat = await Chat.findById(newChat._id)
-                .populate('participants', 'username email avatar onlineStatus');
-            
-            const formattedNewChat = formatChatResponse(populatedChat, currentUserId);
-
-            await invalidateChatCache(participants);
-            emitNewChat(populatedChat);
-            res.status(201).json({ message: 'Chat created successfully', chat: formattedNewChat });
-        } catch (error) {
             logger.error(`Error creating chat: ${error.message}`, error);
             if (error.name === 'ValidationError') {
                 return res.status(400).json({ message: error.message });
