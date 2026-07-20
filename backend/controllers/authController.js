@@ -4,6 +4,33 @@ const User = require("../models/User");
 
 require("dotenv").config();
 
+/**
+ * Register and login answer with the same envelope: a freshly signed token and
+ * a trimmed public view of the user. Only the surrounding `message` and status
+ * code differ, so spread this into the response body.
+ *
+ * Note there is no `onlineStatus` here. Both copies used to include it, but the
+ * User model has no such field - presence lives in Redis - so it was always
+ * `undefined` and JSON.stringify dropped it before the response ever went out.
+ * Carrying it into the shared helper would have made a phantom look canonical.
+ */
+const issueAuthResponse = (user) => ({
+  token: jwt.sign(
+    { userId: user._id, username: user.username },
+    process.env.JWT_SECRET,
+    { expiresIn: process.env.JWT_EXPIRES || "1h" }
+  ),
+  user: {
+    id: user._id,
+    username: user.username,
+    email: user.email,
+    avatar: user.avatar
+  }
+});
+
+// Exported for unit testing - the route handlers are the real entry points.
+exports.issueAuthResponse = issueAuthResponse;
+
 //Register a new user
 exports.register = [
   // Validate request body
@@ -34,21 +61,9 @@ exports.register = [
       const user = new User({ username, email, password });
       await user.save();
 
-      // Generate JWT token
-      const token = jwt.sign({ userId: user._id, username: user.username }, process.env.JWT_SECRET, {
-        expiresIn: process.env.JWT_EXPIRES || "1h",
-      });
-
       res.status(201).json({
         message: "User registered successfully.",
-        token,
-        user: {
-            id: user._id,
-            username: user.username,
-            email: user.email,
-            avatar: user.avatar, // Include avatar if available
-            onlineStatus: user.onlineStatus // Include online status
-        }
+        ...issueAuthResponse(user)
       });
     } catch (error) {
       res.status(500).json({ message: "Server error" });
@@ -77,19 +92,9 @@ exports.login = [
       if (!isMatch)
         return res.status(401).json({ message: "Invalid credentials" });
 
-      const token = jwt.sign({ userId: user._id, username: user.username }, process.env.JWT_SECRET, {
-        expiresIn: process.env.JWT_EXPIRES || "1h",
-      });
-      res.status(200).json({ 
+      res.status(200).json({
         message: "User logged in successfully",
-        token,
-        user: {
-            id: user._id,
-            username: user.username,
-            email: user.email,
-            avatar: user.avatar,
-            onlineStatus: user.onlineStatus
-        }       
+        ...issueAuthResponse(user)
       });
     } catch (error) {
       res.status(500).json({ message: "Server error" });
