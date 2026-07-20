@@ -352,6 +352,3 @@ gradle-app.setting
 ### Project-specific ###
 # Editor settings - local to each machine, not part of the project
 .vscode/
-
-# Scratch remediation notes; delete once phases 0-5 land
-REMEDIATION-PLAN.md
