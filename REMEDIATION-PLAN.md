@@ -18,7 +18,7 @@ Goal: fix the silent breakage first, then collapse the duplication — in that o
 | 1 — Stop losing messages / swallowing errors | **DONE** | `d145197` (1a) + `fafbdd9` (1b/1c/1d) |
 | 2 — Delete `chatListUpdate`, fix reconciliation | **DONE** | `caa2896` |
 | 3 — Remaining correctness | **DONE** | `57dee7e` (typing) + `d951022` (race) + `844ced6` (newChat) + `022e7af` (multi-tab) |
-| 4 — Shared helpers | not started | — |
+| 4 — Shared helpers | in progress — 1 of 6 | `d579a42` (null-deref fix) + `messageStatus.js` |
 | 5 — Cleanup | not started | — |
 
 A test suite now exists (`fdce6b0`) — jest on the backend, vitest on the frontend.
@@ -118,7 +118,22 @@ Then guard the increment at `:292` with `!fromMe` (the variable already exists a
 
 Deliberately after correctness, so we extract the *fixed* shape.
 
-- **`backend/utils/messageStatus.js`** — export the already-correct `areAllOtherInArray` (currently trapped unexported at `statusEvents.js:1-7`) plus `computeDeliveredToAll`. Replaces 4 copy-pastes: `config/socket.js:119-121`, `:168-170`, `chatEvents.js:157-163`, `statusEvents.js:120-122`. **Fix the null deref while here:** `chatEvents.js:157` does `updatedMsg.sender` where `updatedMsg` is `null` whenever the participant is already in `deliveredTo` — it throws, the catch throws again, and `invalidateChatCache` at `:176` is skipped, leaving every participant's cache stale for the full 300s TTL. Guard with `if (!updatedMsg) continue;`.
+- ~~**`backend/utils/messageStatus.js`**~~ — **DONE.** Exports `areAllOtherInArray`,
+  `computeDeliveredToAll`, `computeReadByAll`. Notes for the remaining five:
+  - There were **five** copies, not four — `syncMissedReadReceipts` in
+    `config/socket.js` had a read-side one the audit missed. Grep for the
+    *shape* (`.filter(id => id !== sender)` followed by `.every`), not the
+    line numbers, when doing the rest.
+  - The null-deref fix landed **first**, as its own commit (`d579a42`) with
+    tests, before the extraction. Worth repeating: a behavioural fix tangled
+    into a refactor commit can't be bisected or reverted on its own.
+  - The helpers return `false` for a null message rather than throwing, which
+    is what made the extraction safe at the call sites that pass a guarded
+    `findOneAndUpdate` result straight in.
+  - Extraction was verified behaviour-neutral by re-running the live driver
+    and diffing against the pre-refactor output — not just by unit tests,
+    since three of the five sites are in the connection bootstrap that has
+    no unit coverage at all.
 - **`backend/utils/chatAuth.js`** — `findChatForParticipant(chatId, userId, select)`. Replaces 6 sites in 3 idioms: `chatEvents.js:17,76`, `statusEvents.js:30-34`, `chatController.js:241,295,338`. Two wrappers so sockets emit `{chatId, message}` and controllers get a 403.
 - **`backend/utils/presence.js`** — `syncUserSockets(io, redis, userId)`. Replaces the identical 5-line block at `config/socket.js:58-62` and `disconnectEvents.js:18-23`. The `del`-then-`sadd` sequence is **non-atomic** (a concurrent connect between them reads an empty set and broadcasts a genuinely-online user as offline) → wrap in `MULTI`. Add TTLs to `userLastSeen:` (`disconnectEvents.js:32`) and the socket set, which currently never expire.
 - **`backend/utils/encryption.js`** — add `decryptMessageDoc(msg)` covering text + caption. Replaces `chatEvents.js:108-124`, `chatController.js:260-271`, `:31-37`. Pick **one** fallback — the third currently leaves raw ciphertext in `latestMessage.content`, which renders as garbage in the sidebar.

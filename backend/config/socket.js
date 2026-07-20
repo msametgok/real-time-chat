@@ -15,6 +15,7 @@ const initializeTypingEventHandlers = require('../socketHandlers/typingEvents');
 const initializeStatusEventHandlers = require('../socketHandlers/statusEvents');
 const initializeDisconnectHandlers = require('../socketHandlers/disconnectEvents');
 const { invalidateChatCache } = require('../utils/chatCache');
+const { computeDeliveredToAll, computeReadByAll } = require('../utils/messageStatus');
 
 // Held at module scope so non-socket code (HTTP controllers) can broadcast.
 // Anything that reads this must tolerate `null` - it is unset until the server
@@ -123,9 +124,7 @@ const initializeSocket = async (server) => {
               { $addToSet: { deliveredTo: userId } },
               { new: true, select: 'sender deliveredTo' }
             ).lean();
-            const senderId = updated.sender.toString();
-            const otherIds = participants.map(p => p.toString()).filter(i => i !== senderId);
-            const deliveredToAll = otherIds.every(i => updated.deliveredTo.map(d => d.toString()).includes(i));
+            const deliveredToAll = computeDeliveredToAll(updated, participants);
             io.to(chatId.toString()).emit('messageDeliveryUpdate', {
               chatId,
               messageId:         msg._id.toString(),
@@ -173,9 +172,7 @@ const syncMissedDeliveryEvents = async (socket, userId, chatIds) => {
 
       for (const msg of messages) {
         const chat = await Chat.findById(chatId).select('participants').lean();
-        const senderId = msg.sender.toString();
-        const otherIds = chat.participants.map(p => p.toString()).filter(id => id !== senderId);
-        const deliveredToAll = otherIds.every(id => msg.deliveredTo.map(d => d.toString()).includes(id));
+        const deliveredToAll = computeDeliveredToAll(msg, chat.participants);
 
         socket.emit('messageDeliveryUpdate', {
           chatId,
@@ -208,9 +205,7 @@ const syncMissedReadReceipts = async (socket, userId, chatIds) => {
       const participantIds = chat.participants.map(p => p.toString());
 
       for (const msg of msgs) {
-        // Which other participants beyond sender
-        const otherIds = participantIds.filter(id => id !== msg.sender.toString());
-        const readByAll = otherIds.every(id => msg.readBy.map(d => d.toString()).includes(id));
+        const readByAll = computeReadByAll(msg, participantIds);
 
         socket.emit('messagesReadUpdate', {
           chatId,

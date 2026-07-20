@@ -1,3 +1,5 @@
+const { computeDeliveredToAll } = require('../utils/messageStatus');
+
 // Destructure dependencies passed from main socket.js
 module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, invalidateChatCache }) => {
 
@@ -173,13 +175,7 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, 
                     if (!updatedMsg) continue;
 
                     // Compute whether *all* other participants have now received it
-                    const senderId = updatedMsg.sender.toString();
-                    const otherIds = chat.participants
-                    .map(p => p.toString())
-                    .filter(id => id !== senderId);
-                    const deliveredToAll = otherIds.every(id =>
-                    updatedMsg.deliveredTo.map(d => d.toString()).includes(id)
-                    );
+                    const deliveredToAll = computeDeliveredToAll(updatedMsg, chat.participants);
 
                     // Broadcast exactly the same update your React client expects
                     io.to(chatId).emit('messageDeliveryUpdate', {

@@ -1,10 +1,4 @@
-const areAllOtherInArray = (statusArray = [], participants = [], senderId) => {
-    const statusIds = statusArray.map(id => id.toString());
-    const others = participants
-        .map(id => id.toString())
-        .filter(pid => pid !== senderId.toString());
-    return others.every(pid => statusIds.includes(pid));
-};
+const { computeDeliveredToAll, computeReadByAll } = require('../utils/messageStatus');
 
 module.exports = ({ io, socket, logger, redis, Message, Chat }) => {
 
@@ -63,7 +57,7 @@ module.exports = ({ io, socket, logger, redis, Message, Chat }) => {
 
                 // Determine which are now read by all
                 const readByAll = updated
-                .filter(msg => areAllOtherInArray(msg.readBy, chat.participants, msg.sender))
+                .filter(msg => computeReadByAll(msg, chat.participants))
                 .map(msg => msg._id.toString());
 
                 // Broadcast to chat room
@@ -118,11 +112,7 @@ module.exports = ({ io, socket, logger, redis, Message, Chat }) => {
             const chat = await Chat.findById(chatId).select('participants').lean();
             if (!chat) return;
 
-            const deliveredToAll = areAllOtherInArray(
-                updatedMsg.deliveredTo,
-                chat.participants,
-                updatedMsg.sender
-            );
+            const deliveredToAll = computeDeliveredToAll(updatedMsg, chat.participants);
 
             // 4) Broadcast a delivery update for *this* message
             io.to(chatId).emit('messageDeliveryUpdate', {
