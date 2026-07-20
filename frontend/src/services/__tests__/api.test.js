@@ -112,3 +112,40 @@ describe('api still behaves', () => {
         );
     });
 });
+
+describe('searchUsers', () => {
+    // The server validates `keyword` when present but treats it as absent when
+    // missing. Sending keyword= on an empty box would be an empty-string search
+    // rather than "list everyone".
+    it('omits keyword entirely when the search box is empty', async () => {
+        request.mockResolvedValue({ data: { users: [] } });
+
+        await api.searchUsers('', 'tok');
+
+        const { url: endpoint } = request.mock.calls[0][0];
+        expect(endpoint).not.toContain('keyword');
+        expect(endpoint).toContain('/api/users?');
+    });
+
+    it('sends the keyword and paging options when given', async () => {
+        request.mockResolvedValue({ data: { users: [] } });
+
+        await api.searchUsers('emre', 'tok', { limit: 20, page: 2 });
+
+        const { url: endpoint } = request.mock.calls[0][0];
+        expect(endpoint).toContain('keyword=emre');
+        expect(endpoint).toContain('limit=20');
+        expect(endpoint).toContain('page=2');
+    });
+
+    // A username with a space or & would otherwise break the query string.
+    it('encodes a keyword with special characters', async () => {
+        request.mockResolvedValue({ data: { users: [] } });
+
+        await api.searchUsers('a b&c', 'tok');
+
+        const { url: endpoint } = request.mock.calls[0][0];
+        expect(endpoint).not.toMatch(/keyword=a b&c/);
+        expect(endpoint).toContain('keyword=a+b%26c');
+    });
+});

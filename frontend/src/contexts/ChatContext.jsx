@@ -225,11 +225,17 @@ export function ChatProvider({ children }) {
   );
 
   // 3) Select a chat
+  // `chatHint` exists for chats that are not in `chats` yet. Creating a chat
+  // calls fetchChats() and then selectChat(), but the setChats from that fetch
+  // has not reached this closure by the next line (gotcha 5), so the lookup
+  // missed and a brand-new chat opened as `null` - nothing happened. Reading
+  // through chatsRef instead of the `chats` closure fixes the common case and
+  // drops a dependency; the hint covers the create path outright.
   const selectChat = useCallback(
-    async chatId => {
+    async (chatId, chatHint = null) => {
       if (activeChat?._id === chatId) return;
-      
-      const sel = chats.find(c => c._id === chatId) || null;
+
+      const sel = chatHint || chatsRef.current.find(c => c._id === chatId) || null;
       setActiveChat(sel);
       setMessages([]);
       // Drop every indicator on switch. A typist who vanished (abrupt
@@ -259,7 +265,7 @@ export function ChatProvider({ children }) {
         await fetchMessages(chatId);
       }
     },
-    [activeChat?._id, chats, fetchMessages]
+    [activeChat?._id, fetchMessages]
   );
 
   const sendMessage = useCallback((messageData) => {
@@ -845,20 +851,29 @@ const handleMessageDeliveryUpdate = useCallback(
   }, [hasConnected]);
 
   // â”€â”€â”€ 9) Chat creation helpers â”€â”€â”€
+  //
+  // These deliberately do NOT write to `chatError`: ChatList renders that
+  // *instead of* the sidebar, so a failed "create chat" used to blank the chat
+  // list. They throw instead, and the caller (NewChatModal) shows the message
+  // where the user is actually looking.
+  //
+  // The created chat is handed to selectChat directly. fetchChats() has only
+  // queued its setChats at this point, so a lookup by id would miss the chat
+  // that was just made and open nothing (gotcha 5).
   const createOneOnOneChatAPI = useCallback(
     async otherUserId => {
       if (!isAuthenticated || !user?.token)
         throw new Error("User not authenticated");
       setIsLoadingChats(true);
-      setChatError(null);
       try {
+        // 200 (already existed) and 201 (created) both return { chat } - an
+        // existing conversation should just open, not error.
         const data = await api.createOneOnOneChat(otherUserId, user.token);
         await fetchChats();
-        await selectChat(data.chat._id);
+        await selectChat(data.chat._id, data.chat);
         return data.chat;
       } catch (err) {
         console.error("ChatContext: createOneOnOneChat error", err);
-        setChatError(err.message || "Failed to create chat");
         throw err;
       } finally {
         setIsLoadingChats(false);
@@ -872,7 +887,6 @@ const handleMessageDeliveryUpdate = useCallback(
       if (!isAuthenticated || !user?.token)
         throw new Error("User not authenticated");
       setIsLoadingChats(true);
-      setChatError(null);
       try {
         const data = await api.createGroupChat(
           chatName,
@@ -880,17 +894,28 @@ const handleMessageDeliveryUpdate = useCallback(
           user.token
         );
         await fetchChats();
-        await selectChat(data.chat._id);
+        await selectChat(data.chat._id, data.chat);
         return data.chat;
       } catch (err) {
         console.error("ChatContext: createGroupChat error", err);
-        setChatError(err.message || "Failed to create group chat");
         throw err;
       } finally {
         setIsLoadingChats(false);
       }
     },
     [isAuthenticated, user?.token, fetchChats, selectChat]
+  );
+
+  // Thin pass-through so components never handle the token themselves (api.js
+  // takes it per call). Throws on failure like the create helpers - the caller
+  // owns how to show it.
+  const searchUsers = useCallback(
+    async (keyword, options) => {
+      if (!isAuthenticated || !user?.token) throw new Error('User not authenticated');
+      const data = await api.searchUsers(keyword, user.token, options);
+      return data?.users || [];
+    },
+    [isAuthenticated, user?.token]
   );
 
   const contextValue = {
@@ -907,6 +932,7 @@ const handleMessageDeliveryUpdate = useCallback(
     selectChat,
     createOneOnOneChatAPI,
     createGroupChatAPI,
+    searchUsers,
     hasConnected,
     connectionError,
     realtimeError,

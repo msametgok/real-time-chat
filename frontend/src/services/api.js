@@ -117,7 +117,24 @@ const api = {
      */
 
     async createGroupChat(chatName, participantIds, token) {
-        return this.request('/api/chat/group', 'POST', { chatName, participantIds }, token);   
+        return this.request('/api/chat/group', 'POST', { chatName, participantIds }, token);
+    },
+
+    /**
+     * Search users by username or email. The server already excludes the
+     * caller, so results are always people you could start a chat with.
+     * An empty keyword is valid and lists everyone, one page at a time.
+     * @param {string} keyword - Partial username or email; '' lists all.
+     * @param {string} token - JWT token
+     * @param {{limit?: number, page?: number}} [options]
+     * @returns {Promise<{users: Array, currentPage: number, totalPages: number, totalResults: number}>}
+     */
+    async searchUsers(keyword, token, { limit = 10, page = 1 } = {}) {
+        const params = new URLSearchParams({ limit: String(limit), page: String(page) });
+        // Only send `keyword` when there is one: the server treats a missing
+        // keyword as "list everyone", but validates it when present.
+        if (keyword) params.set('keyword', keyword);
+        return this.request(`/api/users?${params.toString()}`, 'GET', null, token);
     },
 
 };
