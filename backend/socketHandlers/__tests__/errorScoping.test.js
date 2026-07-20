@@ -18,6 +18,9 @@ const buildHarness = (initializer, { failWith = new Error('boom') } = {}) => {
     const socket = {
         id: 'socket-1',
         user: { userId: 'user-1', username: 'alice' },
+        // In chat-1's room: the typing handlers authorize by room membership,
+        // and these tests need to reach the throwing Redis call beyond it.
+        rooms: new Set(['socket-1', 'user-user-1', 'chat-1']),
         on: (event, fn) => { handlers[event] = fn; },
         emit: (event, payload) => { socketEmits.push({ event, payload }); return socket; },
         join: jest.fn(),

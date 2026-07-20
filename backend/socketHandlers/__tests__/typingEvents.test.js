@@ -4,14 +4,20 @@ const initializeTypingEventHandlers = require('../typingEvents');
  * Fake `deps` matching what config/socket.js passes in. See
  * statusEvents.test.js for the original of this pattern.
  */
-const buildHarness = ({ userId = 'user-1', username = 'alice' } = {}) => {
+const CHAT_ID = 'chat-9';
+
+/**
+ * `joinedChats` controls which chat rooms the socket is in - typing events are
+ * authorized by room membership, so this is what decides accept vs ignore.
+ */
+const buildHarness = ({ userId = 'user-1', username = 'alice', joinedChats = [CHAT_ID] } = {}) => {
     const handlers = {};
     const roomEmits = [];
 
     const socket = {
         id: 'socket-1',
         user: { userId, username },
-        rooms: new Set(['socket-1', `user-${userId}`]),
+        rooms: new Set(['socket-1', `user-${userId}`, ...joinedChats]),
         on: (event, fn) => { handlers[event] = fn; },
         to: jest.fn(room => ({
             emit: (event, payload) => roomEmits.push({ room, event, payload })
@@ -86,5 +92,56 @@ describe('typing broadcasts', () => {
         expect(roomEmits).toHaveLength(0);
         expect(redis.set).not.toHaveBeenCalled();
         expect(logger.error).not.toHaveBeenCalled();
+    });
+});
+
+describe('typing authorization', () => {
+    // There was no check at all: any authenticated user could emit typingStart
+    // for any chatId and the server broadcast it, letting a stranger inject
+    // "alice is typing..." into a conversation they are not part of.
+    it('does not broadcast typing into a chat the socket has not joined', async () => {
+        const { handlers, roomEmits } = buildHarness({ joinedChats: [] });
+
+        await handlers.typingStart({ chatId: 'someone-elses-chat' });
+
+        expect(roomEmits).toHaveLength(0);
+    });
+
+    it('does not write a Redis key for an unauthorized chat', async () => {
+        const { handlers, redis } = buildHarness({ joinedChats: [] });
+
+        await handlers.typingStart({ chatId: 'someone-elses-chat' });
+
+        expect(redis.set).not.toHaveBeenCalled();
+    });
+
+    it('blocks typingStop just as it blocks typingStart', async () => {
+        const { handlers, roomEmits, redis } = buildHarness({ joinedChats: [] });
+
+        await handlers.typingStop({ chatId: 'someone-elses-chat' });
+
+        expect(roomEmits).toHaveLength(0);
+        expect(redis.del).not.toHaveBeenCalled();
+    });
+
+    it('only blocks the chats the socket is actually missing', async () => {
+        const { handlers, roomEmits } = buildHarness({ joinedChats: ['chat-mine'] });
+
+        await handlers.typingStart({ chatId: 'chat-theirs' });
+        await handlers.typingStart({ chatId: 'chat-mine' });
+
+        expect(roomEmits.map(e => e.room)).toEqual(['chat-mine']);
+    });
+
+    // Logged so the rejection is visible, but nothing is emitted back - a
+    // non-participant shouldn't learn whether the chat exists.
+    it('logs a warning without replying to the sender', async () => {
+        const { handlers, logger, socket } = buildHarness({ joinedChats: [] });
+
+        await handlers.typingStart({ chatId: 'someone-elses-chat' });
+
+        expect(logger.warn).toHaveBeenCalled();
+        expect(logger.error).not.toHaveBeenCalled();
+        expect(socket.to).not.toHaveBeenCalled();
     });
 });
