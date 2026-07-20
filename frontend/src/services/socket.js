@@ -32,9 +32,6 @@ class SocketService {
       messageDeliveryUpdate: null,
       userStatusUpdate: null,
       userConnectedToChat: null,
-      userDisconnectedFromChat: null,
-      joinChatAck: null,
-      leftChatAck: null,
       messageSentAck: null,
       chatError: null,
       messageError: null,
@@ -115,9 +112,6 @@ class SocketService {
     this.socket.on('messageDeliveryUpdate', data => this.eventCallbacks.messageDeliveryUpdate?.(data));
     this.socket.on('userStatusUpdate', data => this.eventCallbacks.userStatusUpdate?.(data));
     this.socket.on('userConnectedToChat', data => this.eventCallbacks.userConnectedToChat?.(data));
-    this.socket.on('userDisconnectedFromChat', data => this.eventCallbacks.userDisconnectedFromChat?.(data));
-    this.socket.on('joinedChat', data => this.eventCallbacks.joinChatAck?.(data));
-    this.socket.on('leftChatAck', data => this.eventCallbacks.leftChatAck?.(data));
     this.socket.on('messageSentAck', data => this.eventCallbacks.messageSentAck?.(data));
     this.socket.on('chatError', data => this.eventCallbacks.chatError?.(data));
     this.socket.on('messageError', data => this.eventCallbacks.messageError?.(data));
@@ -185,18 +179,14 @@ class SocketService {
   onUserConnectedToChat(cb) { this._registerListener('userConnectedToChat', cb); }
   offUserConnectedToChat(cb) { this._unregisterListener('userConnectedToChat', cb); }
 
-  onUserDisconnectedFromChat(cb) { this._registerListener('userDisconnectedFromChat', cb); }
-  offUserDisconnectedFromChat(cb) { this._unregisterListener('userDisconnectedFromChat', cb); }
-
-  onJoinChatAck(cb) { this._registerListener('joinChatAck', cb); }
-  offJoinChatAck(cb) { this._unregisterListener('joinChatAck', cb); }
-
-  onLeftChatAck(cb) { this._registerListener('leftChatAck', cb); }
-  offLeftChatAck(cb) { this._unregisterListener('leftChatAck', cb); }
-
   onMessageSentAck(cb) { this._registerListener('messageSentAck', cb); }
   offMessageSentAck(cb) { this._unregisterListener('messageSentAck', cb); }
 
+  // chatError and statusError are kept although nothing consumes them yet.
+  // The server really does emit both - a failed joinChat, a rejected
+  // markMessagesAsRead - and they currently vanish. That is the same gap
+  // messageError had before it was wired up: an error channel the client never
+  // listens on. Deleting the seam would only make it harder to close.
   onChatError(cb) { this._registerListener('chatError', cb); }
   offChatError(cb) { this._unregisterListener('chatError', cb); }
 

@@ -212,8 +212,8 @@ exports.createGroupChat = [
 
             // Populate for response
             const populatedChat = await Chat.findById(newGroupChat._id)
-                .populate('participants', 'username email avatar onlineStatus')
-                .populate('groupAdmin', 'username email avatar onlineStatus')
+                .populate('participants', 'username email avatar')
+                .populate('groupAdmin', 'username email avatar')
             const formattedChat = formatChatResponse(populatedChat, currentUserId);
 
             // Invalidate cache for all participants
@@ -247,7 +247,7 @@ exports.getUserChats = [
             logger.info(`Fetching chats for user ${currentUserId} from DB.`);
             // Fetch chats from DB where the current user is a participant
             const chats = await Chat.find({ participants: currentUserId })
-                .populate('participants', 'username email avatar onlineStatus') // Populate participant details
+                .populate('participants', 'username email avatar') // Populate participant details
                 .populate({ // Populate latest message and its sender
                     path: 'latestMessage',
                     populate: { path: 'sender', select: 'username avatar' }
@@ -332,7 +332,7 @@ exports.getChatDetails = [
 
         try {
             const chat = await Chat.findOne({ _id: chatId, participants: currentUserId })
-                .populate('participants', 'username email avatar onlineStatus')
+                .populate('participants', 'username email avatar')
                 .populate({
                     path: 'latestMessage',
                     populate: { path: 'sender', select: 'username avatar' }

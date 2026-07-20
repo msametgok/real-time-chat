@@ -5,7 +5,7 @@ const { findChatForParticipant } = require('../utils/chatAuth');
 // decryptMessageDoc arrives through deps rather than a direct require so the
 // handler stays testable with a fake - same reason `decrypt` used to. `decrypt`
 // itself is no longer used here now that the helper owns the fallback.
-module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decryptMessageDoc, invalidateChatCache }) => {
+module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decryptMessageDoc }) => {
 
     socket.on('joinChat', async (data) => {
         // Declared outside the try so the catch block can actually read them -
@@ -175,8 +175,10 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decryptMe
                 }
             }
 
-            // Invalidate chat cache for all participants since latestMessage/order changed
-            await invalidateChatCache(chat.participants);
+            // No invalidateChatCache here: Message's post-save hook already
+            // updates Chat.latestMessage and invalidates the cache for every
+            // participant. Doing it again just paid for a second round of
+            // Redis deletes on the same keys.
             logger.info(`Message ${newMessage._id} by ${username} in chat ${chatId}`);
 
         } catch (error) {

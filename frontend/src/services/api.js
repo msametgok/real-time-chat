@@ -81,25 +81,6 @@ const api = {
     },
 
     /**
-     * Get messages for a chat (placeholder for ChatWindow.jsx).
-     * @param {string} chatId - Chat ID.
-     * @param {string} token - JWT token.
-     * @returns {Promise<Object>} - List of messages.
-     */
-    async getMessages(chatId, token) {
-        return this.request(`/api/chat/${chatId}/messages`, 'GET', null, token);
-    },
-
-    /**
-    * Get current user profile
-    * @param {String} token - JWT token
-    * @returns {Promise<Object>} - User profile data
-    */
-    async getCurrentUserProfile(token) {
-        return this.request('/api/users/profile', 'GET', null, token);
-    },
-
-    /**
      * 
      * @param {String} token 
      * @returns {Promise<Object>} - List of user chats

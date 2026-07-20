@@ -25,7 +25,7 @@ exports.getUserPublicProfile = [
     handleValidation,
     async (req, res) => {
         try {
-            const user = await User.findById(req.params.userId).select('username avatar onlineStatus lastSeen').lean();
+            const user = await User.findById(req.params.userId).select('username avatar').lean();
 
             if(!user) {
                 logger.warn(`Public profile not found for userId: ${req.params.userId}`);
@@ -163,7 +163,7 @@ exports.searchUsers = [
             }
 
             const users = await User.find(queryOptions)
-                .select('username avatar onlineStatus lastSeen _id')
+                .select('username avatar _id')
                 .sort({ username: 1 })
                 .skip(skip)
                 .limit(limit)

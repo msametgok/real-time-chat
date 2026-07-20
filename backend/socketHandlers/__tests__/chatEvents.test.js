@@ -238,7 +238,11 @@ describe('delivery receipts for online participants', () => {
         expect(h.logger.error).not.toHaveBeenCalled();
     });
 
-    it('still invalidates the chat cache when a participant is skipped', async () => {
+    // The original symptom of the null deref was that the handler threw
+    // partway and never reached its tail. Cache invalidation used to be that
+    // tail; it now belongs to Message's post-save hook, so the final log line
+    // is what proves the handler ran to completion instead of bailing.
+    it('runs to completion when a participant is skipped', async () => {
         const h = buildHarness();
         primeSuccessfulSend(h);
         bringParticipantOnline(h);
@@ -248,7 +252,22 @@ describe('delivery receipts for online participants', () => {
             chatId, messageType: 'text', content: 'hello', tempId: 'temp-abc'
         });
 
-        expect(h.invalidateChatCache).toHaveBeenCalledWith(participantChat.participants);
+        expect(h.logger.info).toHaveBeenCalledWith(expect.stringContaining('msg-1'));
+        expect(h.logger.error).not.toHaveBeenCalled();
+    });
+
+    // Message's post-save hook already updates Chat.latestMessage and
+    // invalidates every participant's cache. Doing it here as well meant two
+    // rounds of Redis deletes on the same keys per message.
+    it('does not invalidate the chat cache a second time', async () => {
+        const h = buildHarness();
+        primeSuccessfulSend(h);
+
+        await h.handlers.sendMessage({
+            chatId, messageType: 'text', content: 'hello', tempId: 'temp-abc'
+        });
+
+        expect(h.invalidateChatCache).not.toHaveBeenCalled();
     });
 
     it('delivers the message to the room even when the receipt is skipped', async () => {

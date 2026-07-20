@@ -60,9 +60,7 @@ function ChatWindow() {
         );
 
         if (unreadMessages.length > 0) {
-            // FIX: Map the array of message objects to an array of message IDs
             const unreadMessageIds = unreadMessages.map(msg => msg._id);
-            console.log(`Emitting markMessagesAsRead for ${unreadMessageIds.length} messages...`);
             markMessagesAsRead(activeChat._id, unreadMessageIds);
         }
     }, [messages, activeChat, user, markMessagesAsRead]);

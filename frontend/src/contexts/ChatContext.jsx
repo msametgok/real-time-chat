@@ -1,4 +1,4 @@
-// src/contexts/ChatContext.jsx
+﻿// src/contexts/ChatContext.jsx
 
 import React, {
   createContext,
@@ -26,6 +26,13 @@ const makeUUID = () => {
 };
 
 export const ChatContext = createContext(null);
+
+/**
+ * Newest chat first. Written out five times before this; every writer of
+ * `chats` has to re-sort, since any of them can change updatedAt.
+ */
+const sortChats = chats =>
+  [...chats].sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
 
 // Helper to clone and compute delivered/read statuses
 const calculateAndApplyStatus = (msg, chat) => {
@@ -118,7 +125,7 @@ export function ChatProvider({ children }) {
           c.latestMessage?.createdAt || c.updatedAt || new Date().toISOString(),
         unreadCount: c.unreadCount || 0
       }));
-      setChats(normalized.sort((a,b) => new Date(b.updatedAt) - new Date(a.updatedAt)));
+      setChats(sortChats(normalized));
     } catch (err) {
       console.error("ChatContext: fetchChats error", err);
       setChatError(err.message || "Failed to load chats");
@@ -249,12 +256,11 @@ export function ChatProvider({ children }) {
 
     // optimistic sidebar preview + reorder
     setChats(prev =>
-      prev
-      .map(c => (c._id === chatId
-        ? {...c, latestMessage: optimistic, updatedAt: optimistic.createdAt}
-        : c))
-      .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
-      
+      sortChats(
+        prev.map(c => (c._id === chatId
+          ? {...c, latestMessage: optimistic, updatedAt: optimistic.createdAt}
+          : c))
+      )
     );
 
     // actual emit - if the socket is down nothing will ever ack this, so mark
@@ -315,7 +321,7 @@ export function ChatProvider({ children }) {
     socketService.markMessagesAsRead(chatId, messageIds);
   }, []);
 
-  // ─── 4) REAL-TIME HANDLERS ───
+  // â”€â”€â”€ 4) REAL-TIME HANDLERS â”€â”€â”€
  // New message arrives
   const handleNewMessage = useCallback(
     (newMessage) => {
@@ -350,8 +356,8 @@ export function ChatProvider({ children }) {
       // for preview, ordering, and unread - chatListUpdate used to also increment
       // here, so each message bumped the count by more than one.
       setChats((prev) =>
-        prev
-          .map((c) => {
+        sortChats(
+          prev.map((c) => {
             if (c._id === newMessage.chat) {
               const isActive = c._id === activeChat?._id;
 
@@ -369,7 +375,7 @@ export function ChatProvider({ children }) {
             }
             return c;
           })
-          .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+        )
       );
     },
     [activeChat?._id, user?._id, isAuthenticated]
@@ -390,9 +396,7 @@ export function ChatProvider({ children }) {
           chat.latestMessage?.createdAt || chat.updatedAt || new Date().toISOString(),
         unreadCount: chat.unreadCount || 0
       };
-      return [normalized, ...prev].sort(
-        (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
-      );
+      return sortChats([normalized, ...prev]);
     });
   }, []);
 
@@ -464,7 +468,7 @@ const handleMessageDeliveryUpdate = useCallback(
             new Set([...(msg.deliveredTo || []), deliveredToUserId])
           );
 
-          // 💡 RECOMPUTE MESSAGE STATUS
+          // ðŸ’¡ RECOMPUTE MESSAGE STATUS
           const updatedMsg = {
             ...msg,
             deliveredTo: newDelivered,
@@ -491,7 +495,7 @@ const handleMessageDeliveryUpdate = useCallback(
   [chats]
 );
 
-  // ─── 4.5) USER CONNECTED TO CHAT (catch-up when someone comes online) ───
+  // â”€â”€â”€ 4.5) USER CONNECTED TO CHAT (catch-up when someone comes online) â”€â”€â”€
   const handleUserConnectedToChat = useCallback(
     ({ chatId, userId }) => {
       if (
@@ -525,11 +529,11 @@ const handleMessageDeliveryUpdate = useCallback(
       return copy;
     });
     setChats(prev =>
-      prev
-        .map(c => (c._id === message.chat
+      sortChats(
+        prev.map(c => (c._id === message.chat
           ? { ...c, latestMessage: message, updatedAt: message.createdAt }
           : c))
-        .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))
+      )
     );
   }, []);
 
@@ -547,7 +551,7 @@ const handleMessageDeliveryUpdate = useCallback(
     setMessagesError(message || 'Failed to send message.');
   }, []);
 
-  // ─── 5) REGISTER HANDLERS ───
+  // â”€â”€â”€ 5) REGISTER HANDLERS â”€â”€â”€
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -582,7 +586,7 @@ const handleMessageDeliveryUpdate = useCallback(
     handleMessageError
   ]);
 
-  // ─── 6) CONNECT/DISCONNECT SOCKET ───
+  // â”€â”€â”€ 6) CONNECT/DISCONNECT SOCKET â”€â”€â”€
   //
   // A rejected connect used to be logged and then dropped: hasConnected stayed
   // false, nothing re-tried, and the app sat in a permanently disconnected
@@ -629,7 +633,7 @@ const handleMessageDeliveryUpdate = useCallback(
     };
   }, [isAuthenticated, user?.token, hasConnected, connectAttempt]);
 
-  // ─── 6.5) JOIN ALL CHATS ON CONNECT ───
+  // â”€â”€â”€ 6.5) JOIN ALL CHATS ON CONNECT â”€â”€â”€
   const joinedChatsRef = useRef(new Set());
 
   useEffect(() => {
@@ -656,7 +660,7 @@ const handleMessageDeliveryUpdate = useCallback(
   }, [hasConnected, chats]);
 
 
-  // ─── 6.6) ALWAYS RE-JOIN ROOMS AND RESYNC AFTER (RE)CONNECT ───
+  // â”€â”€â”€ 6.6) ALWAYS RE-JOIN ROOMS AND RESYNC AFTER (RE)CONNECT â”€â”€â”€
   // On refresh or network hiccup, the server drops all room memberships for the new socket.id.
   // Our joinedChatsRef still says "we're joined", so 6.5 won't re-emit. Do it explicitly here.
   //
@@ -703,7 +707,7 @@ const handleMessageDeliveryUpdate = useCallback(
   }, [hasConnected]);
 
 
-  // ─── 7/8) CATCH-UP: report delivery for messages we have but haven't acked ───
+  // â”€â”€â”€ 7/8) CATCH-UP: report delivery for messages we have but haven't acked â”€â”€â”€
   // These effects depend on `chats`/`messages`, which change on EVERY incoming
   // message, so without a guard they re-emit the whole array each time. Track
   // what we've already reported and only emit for genuinely new message IDs.
@@ -742,7 +746,7 @@ const handleMessageDeliveryUpdate = useCallback(
     if (!hasConnected) deliveryAckedRef.current.clear();
   }, [hasConnected]);
 
-  // ─── 9) Chat creation helpers ───
+  // â”€â”€â”€ 9) Chat creation helpers â”€â”€â”€
   const createOneOnOneChatAPI = useCallback(
     async otherUserId => {
       if (!isAuthenticated || !user?.token)

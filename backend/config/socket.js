@@ -14,7 +14,6 @@ const initializeChatEventHandlers = require('../socketHandlers/chatEvents');
 const initializeTypingEventHandlers = require('../socketHandlers/typingEvents');
 const initializeStatusEventHandlers = require('../socketHandlers/statusEvents');
 const initializeDisconnectHandlers = require('../socketHandlers/disconnectEvents');
-const { invalidateChatCache } = require('../utils/chatCache');
 const { computeDeliveredToAll, computeReadByAll } = require('../utils/messageStatus');
 const { syncUserSockets } = require('../utils/presence');
 
@@ -87,7 +86,10 @@ const initializeSocket = async (server) => {
       // await runs in the same tick as the connection event, so a client emit
       // (which is at least one network hop away) can never outrun it.
       socket.join(`user-${userId}`); // synchronous
-      const deps = { io, socket, logger, redis, User, Chat, Message, encrypt, decryptMessageDoc, invalidateChatCache };
+      // invalidateChatCache is not here: no handler needs it any more. Message's
+      // post-save hook owns cache invalidation, and the controllers import it
+      // directly.
+      const deps = { io, socket, logger, redis, User, Chat, Message, encrypt, decryptMessageDoc };
       initializeChatEventHandlers(deps);
       initializeTypingEventHandlers(deps);
       initializeStatusEventHandlers(deps);

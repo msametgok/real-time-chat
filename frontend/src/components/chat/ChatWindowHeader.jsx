@@ -16,7 +16,6 @@ function ChatWindowHeader() {
       
       const { onlineStatus, lastSeen } = presence[other._id] || {};
 
-      console.log('presence',presence);
       if (onlineStatus === 'online') {
         return 'Online';
       }

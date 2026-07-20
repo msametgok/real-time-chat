@@ -53,7 +53,6 @@ function MessageList() {
         if (scrollEl && scrollEl.scrollTop === 0 && !isLoadingMessages) {
         const oldestMessage = messages[0];
         if (oldestMessage) {
-            console.log('Reached top of scroll, fetching older messages...');
             // Before fetching, set our state to indicate we are loading older messages
             // and save the current scroll height.
             setLoadingOlder(true);
