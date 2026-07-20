@@ -15,6 +15,7 @@ vi.mock('../../services/socket', () => ({
         markMessagesAsRead: vi.fn(),
         messageDeliveredToClient: vi.fn(),
         onNewMessage: vi.fn(), offNewMessage: vi.fn(),
+        onNewChat: vi.fn(), offNewChat: vi.fn(),
         onTyping: vi.fn(), offTyping: vi.fn(),
         onMessagesReadUpdate: vi.fn(), offMessagesReadUpdate: vi.fn(),
         onMessageDeliveryUpdate: vi.fn(), offMessageDeliveryUpdate: vi.fn(),

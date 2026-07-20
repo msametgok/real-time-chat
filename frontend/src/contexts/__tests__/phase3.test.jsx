@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Captured handlers, so tests drive ChatContext directly instead of standing
 // up a real socket.
 let typingHandler = null;
+let newChatHandler = null;
 
 vi.mock('../../services/socket', () => ({
     default: {
@@ -18,6 +19,7 @@ vi.mock('../../services/socket', () => ({
         markMessagesAsRead: vi.fn(),
         messageDeliveredToClient: vi.fn(),
         onNewMessage: vi.fn(), offNewMessage: vi.fn(),
+        onNewChat: vi.fn(cb => { newChatHandler = cb; }), offNewChat: vi.fn(),
         onTyping: vi.fn(cb => { typingHandler = cb; }), offTyping: vi.fn(),
         onMessagesReadUpdate: vi.fn(), offMessagesReadUpdate: vi.fn(),
         onMessageDeliveryUpdate: vi.fn(), offMessageDeliveryUpdate: vi.fn(),
@@ -59,17 +61,6 @@ const chatFixture = (id, updatedAt) => ({
     updatedAt
 });
 
-const renderChats = async () => {
-    api.getUserChats.mockResolvedValue([
-        chatFixture(CHAT_1, '2026-07-19T09:00:00Z'),
-        chatFixture(CHAT_2, '2026-07-19T08:00:00Z')
-    ]);
-
-    const rendered = renderHook(() => useChat(), { wrapper });
-    await waitFor(() => expect(rendered.result.current.chats).toHaveLength(2));
-    return rendered;
-};
-
 const msg = (id, chatId, content) => ({
     _id: id,
     chat: chatId,
@@ -81,6 +72,17 @@ const msg = (id, chatId, content) => ({
     createdAt: '2026-07-19T10:00:00Z'
 });
 
+const renderChats = async () => {
+    api.getUserChats.mockResolvedValue([
+        chatFixture(CHAT_1, '2026-07-19T09:00:00Z'),
+        chatFixture(CHAT_2, '2026-07-19T08:00:00Z')
+    ]);
+
+    const rendered = renderHook(() => useChat(), { wrapper });
+    await waitFor(() => expect(rendered.result.current.chats).toHaveLength(2));
+    return rendered;
+};
+
 const typing = (chatId, userId, isTyping) => ({
     chatId, userId, username: userId === 'user-2' ? 'bob' : 'carol', isTyping
 });
@@ -88,6 +90,7 @@ const typing = (chatId, userId, isTyping) => ({
 beforeEach(() => {
     vi.clearAllMocks();
     typingHandler = null;
+    newChatHandler = null;
     api.getChatMessages.mockResolvedValue({ messages: [] });
 });
 
@@ -208,5 +211,41 @@ describe('selectChat race', () => {
         await act(async () => { releaseSlow(); await firstSelect; });
 
         expect(result.current.isLoadingMessages).toBe(false);
+    });
+});
+
+describe('newChat', () => {
+    // Chat creation is an HTTP call on the creator's side, so without this
+    // event the recipient sees nothing until a manual reload.
+    it('prepends a chat created by someone else', async () => {
+        const { result } = await renderChats();
+
+        await act(async () => {
+            newChatHandler(chatFixture('chat-3', '2026-07-19T12:00:00Z'));
+        });
+
+        expect(result.current.chats).toHaveLength(3);
+        expect(result.current.chats[0]._id).toBe('chat-3');
+    });
+
+    it('does not duplicate a chat already in the list', async () => {
+        const { result } = await renderChats();
+
+        await act(async () => {
+            newChatHandler(chatFixture(CHAT_1, '2026-07-19T12:00:00Z'));
+        });
+
+        expect(result.current.chats).toHaveLength(2);
+    });
+
+    it('defaults unreadCount so the badge does not render NaN', async () => {
+        const { result } = await renderChats();
+
+        await act(async () => {
+            const { unreadCount, ...withoutCount } = chatFixture('chat-3', '2026-07-19T12:00:00Z');
+            newChatHandler(withoutCount);
+        });
+
+        expect(result.current.chats.find(c => c._id === 'chat-3').unreadCount).toBe(0);
     });
 });

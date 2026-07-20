@@ -16,6 +16,13 @@ const initializeStatusEventHandlers = require('../socketHandlers/statusEvents');
 const initializeDisconnectHandlers = require('../socketHandlers/disconnectEvents');
 const { invalidateChatCache } = require('../utils/chatCache');
 
+// Held at module scope so non-socket code (HTTP controllers) can broadcast.
+// Anything that reads this must tolerate `null` - it is unset until the server
+// finishes booting, and stays unset in unit tests that require a controller
+// without standing up Socket.IO.
+let ioInstance = null;
+const getIO = () => ioInstance;
+
 const initializeSocket = async (server) => {
   const io = socketIo(server, {
     cors: { origin: process.env.CLIENT_URL, methods: ['GET','POST'], credentials: true }
@@ -149,6 +156,7 @@ const initializeSocket = async (server) => {
     }
   });
 
+  ioInstance = io;
   logger.info('Socket.IO server initialized.');
   return io;
 };
@@ -217,4 +225,4 @@ const syncMissedReadReceipts = async (socket, userId, chatIds) => {
   }
 };
 
-module.exports = initializeSocket;
+module.exports = { initializeSocket, getIO };

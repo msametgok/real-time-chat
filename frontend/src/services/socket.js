@@ -10,6 +10,7 @@ class SocketService {
     // Store one callback per event name
     this.eventCallbacks = {
       newMessage: null,
+      newChat: null,
       typing: null,
       messagesReadUpdate: null,
       messageDeliveryUpdate: null,
@@ -74,6 +75,7 @@ class SocketService {
 
     // Core event wiring:
     this.socket.on('newMessage', data => this.eventCallbacks.newMessage?.(data));
+    this.socket.on('newChat', data => this.eventCallbacks.newChat?.(data));
     this.socket.on('typing', data => this.eventCallbacks.typing?.(data));
     this.socket.on('messagesReadUpdate', data => this.eventCallbacks.messagesReadUpdate?.(data));
     this.socket.on('messageDeliveryUpdate', data => this.eventCallbacks.messageDeliveryUpdate?.(data));
@@ -130,6 +132,9 @@ class SocketService {
 
   onNewMessage(cb) { this._registerListener('newMessage', cb); }
   offNewMessage(cb) { this._unregisterListener('newMessage', cb); }
+
+  onNewChat(cb) { this._registerListener('newChat', cb); }
+  offNewChat(cb) { this._unregisterListener('newChat', cb); }
 
   onTyping(cb) { this._registerListener('typing', cb); }
   offTyping(cb) { this._unregisterListener('typing', cb); }

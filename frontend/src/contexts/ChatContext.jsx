@@ -375,6 +375,27 @@ export function ChatProvider({ children }) {
     [activeChat?._id, user?._id, isAuthenticated]
   );
 
+  // Someone created a chat that includes us. Chat creation is an HTTP call on
+  // their side, so this event is the only way we learn about it without a
+  // reload. Adding it to `chats` is enough to make the join effect (6.5) put
+  // our socket in the new room.
+  const handleNewChat = useCallback((chat) => {
+    if (!chat?._id) return;
+
+    setChats(prev => {
+      if (prev.some(c => c._id === chat._id)) return prev;
+      const normalized = {
+        ...chat,
+        updatedAt:
+          chat.latestMessage?.createdAt || chat.updatedAt || new Date().toISOString(),
+        unreadCount: chat.unreadCount || 0
+      };
+      return [normalized, ...prev].sort(
+        (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)
+      );
+    });
+  }, []);
+
   // Typing indicators.
   //
   // Keyed by chatId, then userId. The old shape was keyed by userId alone and
@@ -531,6 +552,7 @@ const handleMessageDeliveryUpdate = useCallback(
     if (!isAuthenticated) return;
 
     socketService.onNewMessage(handleNewMessage);
+    socketService.onNewChat(handleNewChat);
     socketService.onTyping(handleTyping);
     socketService.onMessagesReadUpdate(handleMessagesReadUpdate);
     socketService.onMessageDeliveryUpdate(handleMessageDeliveryUpdate);
@@ -540,6 +562,7 @@ const handleMessageDeliveryUpdate = useCallback(
 
     return () => {
       socketService.offNewMessage(handleNewMessage);
+      socketService.offNewChat(handleNewChat);
       socketService.offTyping(handleTyping);
       socketService.offMessagesReadUpdate(handleMessagesReadUpdate);
       socketService.offMessageDeliveryUpdate(handleMessageDeliveryUpdate);
@@ -550,6 +573,7 @@ const handleMessageDeliveryUpdate = useCallback(
   }, [
     isAuthenticated,
     handleNewMessage,
+    handleNewChat,
     handleTyping,
     handleMessagesReadUpdate,
     handleMessageDeliveryUpdate,

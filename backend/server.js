@@ -2,7 +2,7 @@ const http = require('http');
 const mongoose = require('mongoose');
 const app = require('./app');
 const connectDB = require('./config/db');
-const initializeSocket = require('./config/socket');
+const { initializeSocket } = require('./config/socket');
 const logger = require('./config/logger');
 const redisClient = require('./config/redis');
 require('dotenv').config();
