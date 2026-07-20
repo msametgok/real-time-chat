@@ -88,6 +88,13 @@ export function ChatProvider({ children }) {
   // every incoming message).
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+
+  // Same trick for `chats`: fetchMessages only needs it to look up participants
+  // for status computation. Taking it as a dependency would recreate
+  // fetchMessages (and selectChat with it) on every sidebar change.
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
+
   const [isLoadingChats, setIsLoadingChats] = useState(false);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [chatError, setChatError] = useState(null);
@@ -134,10 +141,16 @@ export function ChatProvider({ children }) {
     }
   }, [isAuthenticated, authLoading, user, fetchChats]);
 
+  // Monotonic ticket for message fetches. Clicking chat A then B fast leaves
+  // two requests in flight; whichever resolves last would win, so A's messages
+  // could land in B's window. Only the newest ticket is allowed to write.
+  const fetchSeqRef = useRef(0);
+
   // 2) Fetch messages for a chat
   const fetchMessages = useCallback(
     async (chatId, beforeTimestamp = null) => {
       if (!isAuthenticated || !user?.token || !chatId) return;
+      const seq = ++fetchSeqRef.current;
       setIsLoadingMessages(true);
       setMessagesError(null);
       try {
@@ -147,7 +160,8 @@ export function ChatProvider({ children }) {
           30,
           beforeTimestamp
         );
-        const currentChat = chats.find(c => c._id === chatId);
+        if (fetchSeqRef.current !== seq) return; // superseded - drop the response
+        const currentChat = chatsRef.current.find(c => c._id === chatId);
         const withStatus = data.messages.map(m =>
           calculateAndApplyStatus(m, currentChat)
         );
@@ -169,13 +183,16 @@ export function ChatProvider({ children }) {
           return pendingLocal.length ? [...sorted, ...pendingLocal] : sorted;
         });
       } catch (err) {
+        if (fetchSeqRef.current !== seq) return;
         console.error(`ChatContext: fetchMessages error for ${chatId}`, err);
         setMessagesError(err.message || "Failed to load messages");
       } finally {
-        setIsLoadingMessages(false);
+        // A superseded fetch must not clear the spinner belonging to the one
+        // that replaced it.
+        if (fetchSeqRef.current === seq) setIsLoadingMessages(false);
       }
     },
-    [isAuthenticated, user?.token, chats]
+    [isAuthenticated, user?.token]
   );
 
   // 3) Select a chat

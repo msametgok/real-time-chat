@@ -70,6 +70,17 @@ const renderChats = async () => {
     return rendered;
 };
 
+const msg = (id, chatId, content) => ({
+    _id: id,
+    chat: chatId,
+    sender: { _id: 'user-2', username: 'bob' },
+    messageType: 'text',
+    content,
+    deliveredTo: ['user-1'],
+    readBy: [],
+    createdAt: '2026-07-19T10:00:00Z'
+});
+
 const typing = (chatId, userId, isTyping) => ({
     chatId, userId, username: userId === 'user-2' ? 'bob' : 'carol', isTyping
 });
@@ -149,5 +160,53 @@ describe('typing state is scoped per chat', () => {
         await act(async () => { await result.current.selectChat(CHAT_2); });
 
         expect(result.current.typingUsers).toEqual({});
+    });
+});
+
+describe('selectChat race', () => {
+    // Clicking chat-1 then chat-2 fast leaves two fetches in flight. Without a
+    // guard the slower (chat-1) response resolves last and writes A's messages
+    // into B's open window.
+    it('drops a superseded response instead of writing it into the new chat', async () => {
+        const { result } = await renderChats();
+
+        let releaseSlow;
+        const slow = new Promise(resolve => { releaseSlow = resolve; });
+
+        api.getChatMessages.mockImplementation(chatId =>
+            chatId === CHAT_1
+                ? slow.then(() => ({ messages: [msg('m-old', CHAT_1, 'from chat one')] }))
+                : Promise.resolve({ messages: [msg('m-new', CHAT_2, 'from chat two')] })
+        );
+
+        // Start chat-1's fetch but don't let it finish; then switch to chat-2.
+        let firstSelect;
+        await act(async () => { firstSelect = result.current.selectChat(CHAT_1); });
+        await act(async () => { await result.current.selectChat(CHAT_2); });
+
+        // chat-1's response only lands now - too late to be allowed to write.
+        await act(async () => { releaseSlow(); await firstSelect; });
+
+        expect(result.current.activeChat?._id).toBe(CHAT_2);
+        expect(result.current.messages.map(m => m._id)).toEqual(['m-new']);
+    });
+
+    it('leaves the loading flag owned by the newest fetch', async () => {
+        const { result } = await renderChats();
+
+        let releaseSlow;
+        const slow = new Promise(resolve => { releaseSlow = resolve; });
+        api.getChatMessages.mockImplementation(chatId =>
+            chatId === CHAT_1
+                ? slow.then(() => ({ messages: [] }))
+                : Promise.resolve({ messages: [] })
+        );
+
+        let firstSelect;
+        await act(async () => { firstSelect = result.current.selectChat(CHAT_1); });
+        await act(async () => { await result.current.selectChat(CHAT_2); });
+        await act(async () => { releaseSlow(); await firstSelect; });
+
+        expect(result.current.isLoadingMessages).toBe(false);
     });
 });
