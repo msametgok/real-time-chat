@@ -41,10 +41,16 @@ const formatChatResponse = (chat, currentUserId) => {
 }
 
 /**
- * Tell every other participant a chat now exists. Creation happens over HTTP,
- * so without this the recipient has no idea until they reload - and their
- * socket never joins the new room either (the client rejoins on chat-list
- * change, so prepending the chat is enough to trigger it).
+ * Tell every participant a chat now exists. Creation happens over HTTP, so
+ * without this the others have no idea until they reload - and their sockets
+ * never join the new room either (the client rejoins on chat-list change, so
+ * prepending the chat is enough to trigger it).
+ *
+ * The creator is included deliberately. Their originating tab already has the
+ * chat from the HTTP response and ignores this via the dedupe in
+ * handleNewChat, but their OTHER tabs and devices have no other way to learn
+ * about it - `user-<id>` is a fan-out room across every socket that user has
+ * open. Skipping them left those sessions blind until a manual reload.
  *
  * Payload is built per recipient because formatChatResponse resolves
  * displayChatName/chatAvatar relative to the viewer.
@@ -52,14 +58,13 @@ const formatChatResponse = (chat, currentUserId) => {
  * Best-effort: a socket failure must not fail the HTTP request that just
  * successfully created the chat.
  */
-const emitNewChat = (populatedChat, creatorId) => {
+const emitNewChat = (populatedChat) => {
     try {
         const io = getIO();
         if (!io) return;
 
         for (const participant of populatedChat.participants || []) {
             const pid = (participant?._id || participant).toString();
-            if (pid === creatorId.toString()) continue;
             io.to(`user-${pid}`).emit('newChat', formatChatResponse(populatedChat, pid));
         }
     } catch (error) {
@@ -130,7 +135,7 @@ exports.createOneOnOneChat = [
             const formattedNewChat = formatChatResponse(populatedChat, currentUserId);
 
             await invalidateChatCache(participants);
-            emitNewChat(populatedChat, currentUserId);
+            emitNewChat(populatedChat);
             res.status(201).json({ message: 'Chat created successfully', chat: formattedNewChat });
         } catch (error) {
             logger.error(`Error creating chat: ${error.message}`, error);
@@ -192,7 +197,7 @@ exports.createGroupChat = [
 
             // Invalidate cache for all participants
             await invalidateChatCache(allParticipants);
-            emitNewChat(populatedChat, currentUserId);
+            emitNewChat(populatedChat);
 
             res.status(201).json({ message: 'Group chat created successfully', chat: formattedChat });
         } catch (error) {
