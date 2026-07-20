@@ -5,18 +5,22 @@ import ChatWindowHeader from "./ChatWindowHeader";
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
 
-// A new component to display the typing indicator
-const TypingIndicator = () => {
-    const { typingUsers } = useChat();
+// A new component to display the typing indicator.
+// Exported for tests - ChatWindow itself still renders it directly below.
+export const TypingIndicator = () => {
+    const { typingUsers, activeChat } = useChat();
     const { user } = useAuth();
 
-    // Create a memoized list of users currently typing IN THIS CHAT
-    const currentlyTyping = useMemo(() =>
-        Object.entries(typingUsers)
+    // typingUsers is keyed by chatId then userId, so scoping to the open chat
+    // happens here rather than in the socket handler - the handler has to record
+    // every chat's state or it would drop the "stopped typing" cleanup for any
+    // chat that isn't currently open.
+    const currentlyTyping = useMemo(() => {
+        const forChat = (activeChat && typingUsers[activeChat._id]) || {};
+        return Object.entries(forChat)
             .filter(([userId, typingUser]) => typingUser && userId !== user?._id)
-            .map(([, typingUser]) => typingUser.username),
-        [typingUsers, user?._id]
-    );
+            .map(([, typingUser]) => typingUser.username);
+    }, [typingUsers, activeChat, user?._id]);
 
     // If no one else is typing, render an empty div to maintain layout space
     if (currentlyTyping.length === 0) {

@@ -186,6 +186,10 @@ export function ChatProvider({ children }) {
       const sel = chats.find(c => c._id === chatId) || null;
       setActiveChat(sel);
       setMessages([]);
+      // Drop every indicator on switch. A typist who vanished (abrupt
+      // disconnect) never sends typingStop, so an entry can outlive the burst;
+      // anyone still typing re-announces within ~2s.
+      setTypingUsers({});
       if (sel) {
         // Opening a chat clears its badge. handleNewMessage skips the increment
         // while a chat is active, so this only has to cover what accumulated
@@ -354,19 +358,29 @@ export function ChatProvider({ children }) {
     [activeChat?._id, user?._id, isAuthenticated]
   );
 
-  // Typing indicators
+  // Typing indicators.
+  //
+  // Keyed by chatId, then userId. The old shape was keyed by userId alone and
+  // gated on `chatId === activeChat._id` - which also swallowed the
+  // isTyping:false cleanup, so an indicator raised in chat1 could never be
+  // cleared and showed up permanently in chat2. Record every chat's state and
+  // let the view filter by the chat it is rendering.
   const handleTyping = useCallback(
     ({ chatId, userId, username, isTyping }) => {
-      if (chatId === activeChat?._id && userId !== user?._id) {
-        setTypingUsers(prev => {
-          const next = { ...prev };
-          if (isTyping) next[userId] = { username };
-          else delete next[userId];
-          return next;
-        });
-      }
+      if (!chatId || !userId || userId === user?._id) return;
+
+      setTypingUsers(prev => {
+        const forChat = { ...(prev[chatId] || {}) };
+        if (isTyping) forChat[userId] = { username };
+        else delete forChat[userId];
+
+        const next = { ...prev };
+        if (Object.keys(forChat).length > 0) next[chatId] = forChat;
+        else delete next[chatId];
+        return next;
+      });
     },
-    [activeChat?._id, user?._id]
+    [user?._id]
   );
 
   // Read receipts

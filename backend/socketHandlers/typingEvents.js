@@ -16,7 +16,8 @@ module.exports = ({ io, socket, logger, redis }) => {
                 return;
             }
 
-            const key = getTypingKey(userId, chatId);
+            // Argument order matters: the signature is (chatId, userId).
+            const key = getTypingKey(chatId, userId);
 
             // Store username for payload, expire in 10s
             await redis.set(key, username, 'EX', 10);
@@ -49,7 +50,7 @@ module.exports = ({ io, socket, logger, redis }) => {
                 return;
             }
             
-            const key = getTypingKey(userId, chatId);
+            const key = getTypingKey(chatId, userId);
             await redis.del(key); // Remove the key from Redis
 
             // Broadcast to other users in the room
