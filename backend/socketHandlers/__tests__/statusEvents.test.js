@@ -240,7 +240,7 @@ describe('markMessagesAsRead', () => {
         h.socketEmits.forEach(e => expect(e.event).toBe('statusError'));
     });
 
-    it('broadcasts messagesReadUpdate and acks when messages were updated', async () => {
+    it('broadcasts messagesReadUpdate when messages were updated', async () => {
         const h = buildHarness();
         h.Chat.findOne.mockReturnValue(selectLean({ participants: ['user-1', 'user-2'] }));
         h.Message.updateMany.mockResolvedValue({ modifiedCount: 2 });
@@ -255,11 +255,11 @@ describe('markMessagesAsRead', () => {
         expect(readUpdate.payload.messagesReadByAll).toEqual(['m1', 'm2']);
         expect(readUpdate.payload.reader).toEqual({ userId: 'user-1', username: 'alice' });
 
-        const ack = h.socketEmits.find(e => e.event === 'markMessagesAsReadAck');
-        expect(ack.payload).toEqual({ chatId, updatedCount: 2 });
+        // Success is silent: the ack this used to emit had no listener.
+        expect(h.socketEmits).toHaveLength(0);
     });
 
-    it('still acks (with 0) when nothing needed updating', async () => {
+    it('stays quiet when nothing needed updating', async () => {
         const h = buildHarness();
         h.Chat.findOne.mockReturnValue(selectLean({ participants: ['user-1', 'user-2'] }));
         h.Message.updateMany.mockResolvedValue({ modifiedCount: 0 });
@@ -267,8 +267,7 @@ describe('markMessagesAsRead', () => {
         await h.handlers.markMessagesAsRead({ chatId, messageIds: ['m1'] });
 
         expect(h.roomEmits.filter(e => e.event === 'messagesReadUpdate')).toHaveLength(0);
-        const ack = h.socketEmits.find(e => e.event === 'markMessagesAsReadAck');
-        expect(ack.payload.updatedCount).toBe(0);
+        expect(h.socketEmits).toHaveLength(0);
     });
 });
 
@@ -343,8 +342,8 @@ describe('markChatAsRead', () => {
 
         expect(h.Message.updateMany).not.toHaveBeenCalled();
         expect(h.roomEmits).toHaveLength(0);
-        const ack = h.socketEmits.find(e => e.event === 'markMessagesAsReadAck');
-        expect(ack.payload.updatedCount).toBe(0);
+        // Nothing to say - and no ack, since no client listens for one.
+        expect(h.socketEmits).toHaveLength(0);
     });
 
     it('refuses a chat the user does not participate in', async () => {

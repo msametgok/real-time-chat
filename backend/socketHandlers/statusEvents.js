@@ -70,11 +70,8 @@ module.exports = ({ io, socket, logger, redis, Message, Chat }) => {
                 });
             }
 
-            // Acknowledge back
-            socket.emit('markMessagesAsReadAck', {
-                chatId,
-                updatedCount: updateResult.modifiedCount
-            });
+            // No success ack: nothing on the client ever listened for one.
+            // Failures still reach the user through statusError.
 
         } catch (error) {
             logger.error(`Error during 'markMessagesAsRead' for ${readerName}, chat ${chatId}: ${error.message}`, error);
@@ -124,9 +121,7 @@ module.exports = ({ io, socket, logger, redis, Message, Chat }) => {
                 readBy: { $ne: readerId }
             }).select('_id sender readBy').lean();
 
-            if (unread.length === 0) {
-                return socket.emit('markMessagesAsReadAck', { chatId, updatedCount: 0 });
-            }
+            if (unread.length === 0) return;
 
             const messageIds = unread.map(m => m._id.toString());
 
@@ -154,8 +149,6 @@ module.exports = ({ io, socket, logger, redis, Message, Chat }) => {
                 messageIds,
                 messagesReadByAll: readByAll
             });
-
-            socket.emit('markMessagesAsReadAck', { chatId, updatedCount: messageIds.length });
 
         } catch (error) {
             logger.error(`Error during 'markChatAsRead' for ${readerName}, chat ${chatId}: ${error.message}`, error);
