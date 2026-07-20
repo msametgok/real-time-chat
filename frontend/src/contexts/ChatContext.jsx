@@ -583,23 +583,51 @@ const handleMessageDeliveryUpdate = useCallback(
   ]);
 
   // ─── 6) CONNECT/DISCONNECT SOCKET ───
+  //
+  // A rejected connect used to be logged and then dropped: hasConnected stayed
+  // false, nothing re-tried, and the app sat in a permanently disconnected
+  // state that looked identical to an idle one. Now the failure is retried with
+  // backoff and exposed as `connectionError` so the UI can say something.
+  const [connectAttempt, setConnectAttempt] = useState(0);
+  const [connectionError, setConnectionError] = useState(null);
+
   useEffect(() => {
-    if (isAuthenticated && user?.token && !hasConnected) {
-      socketService
-        .connect(user.token)
-        .then(() => {
-          console.log("🔌 Socket connected (ChatProvider)");
-          setHasConnected(true);
-        })
-        .catch(err => {
-          console.error("Socket connect failed:", err);
-        });
-    }
     if (!isAuthenticated && hasConnected) {
       socketService.disconnect();
       setHasConnected(false);
+      setConnectionError(null);
+      setConnectAttempt(0);
+      return;
     }
-  }, [isAuthenticated, user?.token, hasConnected]);
+
+    if (!(isAuthenticated && user?.token && !hasConnected)) return;
+
+    let cancelled = false;
+    let retryTimer = null;
+
+    socketService
+      .connect(user.token)
+      .then(() => {
+        if (cancelled) return;
+        setHasConnected(true);
+        setConnectionError(null);
+        setConnectAttempt(0);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        setConnectionError(err?.message || 'Could not connect to the server.');
+
+        // 3s, 6s, 12s, 24s, then every 30s. Bounded so a long outage doesn't
+        // turn into an unbounded stream of connection attempts.
+        const delay = Math.min(30000, 3000 * 2 ** connectAttempt);
+        retryTimer = setTimeout(() => setConnectAttempt(n => n + 1), delay);
+      });
+
+    return () => {
+      cancelled = true;
+      clearTimeout(retryTimer);
+    };
+  }, [isAuthenticated, user?.token, hasConnected, connectAttempt]);
 
   // ─── 6.5) JOIN ALL CHATS ON CONNECT ───
   const joinedChatsRef = useRef(new Set());
@@ -778,6 +806,7 @@ const handleMessageDeliveryUpdate = useCallback(
     createOneOnOneChatAPI,
     createGroupChatAPI,
     hasConnected,
+    connectionError,
     presence,
     sendMessage,
     retryMessage,

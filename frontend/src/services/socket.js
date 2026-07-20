@@ -2,6 +2,22 @@ import io from 'socket.io-client';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
 
+/**
+ * How long to wait for a first connection before giving up on the promise.
+ * The socket keeps retrying underneath; this only bounds how long a caller
+ * waits before being told something is wrong.
+ */
+export const CONNECT_TIMEOUT_MS = 15000;
+
+/**
+ * Auth failures are fatal - the token is wrong and retrying cannot fix it, so
+ * reject immediately instead of making the caller wait out the timeout.
+ * Anything else (server down, DNS, transport) is potentially transient and is
+ * left to the retry loop until the timeout fires.
+ */
+const isFatalAuthError = err =>
+    typeof err?.message === 'string' && err.message.startsWith('Authentication Error');
+
 class SocketService {
   constructor() {
     this.socket = null;
@@ -44,20 +60,38 @@ class SocketService {
         transports: ['websocket','polling']
       });
 
+      // This promise used to have a path that settled NOTHING: connect_error
+      // rejected only on two exact auth strings, so any other failure - server
+      // down, DNS, transport blocked, a reworded auth message - left it pending
+      // forever. The caller's .then never ran, hasConnected never flipped, and
+      // the app sat there looking idle with no error anywhere.
+      let settled = false;
+      const settle = (fn, arg) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        fn(arg);
+      };
+
+      const timer = setTimeout(
+        () => settle(reject, new Error(
+          `Could not reach the server within ${CONNECT_TIMEOUT_MS / 1000}s.`
+        )),
+        CONNECT_TIMEOUT_MS
+      );
+
       this.socket.on('connect', () => {
         this.isConnected = true;
         this.setupDefaultListeners();
-        resolve();
+        settle(resolve);
       });
 
       this.socket.on('connect_error', err => {
         this.isConnected = false;
-        if (
-          err.message === 'Authentication Error: No token provided.' ||
-          err.message === 'Authentication Error: Invalid token.'
-        ) {
-          reject(err);
-        }
+        // Only auth errors are worth failing fast on. Everything else stays in
+        // socket.io's retry loop, which may still succeed before the timeout -
+        // rejecting on every error would turn a blip into a hard failure.
+        if (isFatalAuthError(err)) settle(reject, err);
       });
 
       this.socket.on('disconnect', () => {
