@@ -149,3 +149,38 @@ describe('searchUsers', () => {
         expect(endpoint).toContain('keyword=a+b%26c');
     });
 });
+
+describe('request body handling', () => {
+    // Axios ignores `data` on GET but serialises null into the literal string
+    // "null" on DELETE, which express.json() rejects with a 400 before the
+    // route runs. The browser reports that as a bare "Network Error", so it
+    // reads like the server is down. Mocking axios hides this entirely - it
+    // was only caught by driving a real delete in the browser.
+    it('omits the body entirely on a no-body request', async () => {
+        request.mockResolvedValue({ data: {} });
+
+        await api.deleteChat('chat-1', 'tok');
+
+        const [config] = request.mock.calls[0];
+        expect(config.method).toBe('DELETE');
+        expect('data' in config).toBe(false);
+    });
+
+    it('still sends a body when there is one', async () => {
+        request.mockResolvedValue({ data: {} });
+
+        await api.updateMyProfile({ username: 'alice2' }, 'tok');
+
+        const [config] = request.mock.calls[0];
+        expect(config.data).toEqual({ username: 'alice2' });
+    });
+
+    it('omits the body on GET too', async () => {
+        request.mockResolvedValue({ data: {} });
+
+        await api.getUserChats('tok');
+
+        const [config] = request.mock.calls[0];
+        expect('data' in config).toBe(false);
+    });
+});

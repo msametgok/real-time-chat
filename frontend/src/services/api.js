@@ -25,9 +25,18 @@ const api = {
             const config = {
                 method,
                 url: endpoint,
-                data,
                 headers: token ? { Authorization: `Bearer ${token}` } : {}
             };
+
+            // Only attach a body when there actually is one. Axios ignores
+            // `data` on GET, but for DELETE it serialises null into the literal
+            // string "null" - which express.json() rejects with
+            //   400 Unexpected token 'n', "null" is not valid JSON
+            // before the route is ever reached. The browser sees that as a bare
+            // "Network Error", so it reads like the server is down.
+            if (data !== null && data !== undefined) {
+                config.data = data;
+            }
 
             // Deliberately no logging of `data` or `response.data` here. The
             // request body carries the plaintext password on login/register,
