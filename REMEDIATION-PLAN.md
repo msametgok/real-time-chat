@@ -19,7 +19,7 @@ Goal: fix the silent breakage first, then collapse the duplication — in that o
 | 2 — Delete `chatListUpdate`, fix reconciliation | **DONE** | `caa2896` |
 | 3 — Remaining correctness | **DONE** | `57dee7e` (typing) + `d951022` (race) + `844ced6` (newChat) + `022e7af` (multi-tab) |
 | 4 — Shared helpers | **DONE** — 6 of 6 | `d579a42` `2973431` `e37863c` `49d28e3` `52cca36` `2a0cb55` `09b7ce7` |
-| 5 — Cleanup | not started | — |
+| 5 — Cleanup | in progress — security pair done | `714005e` (console leak) + `56f81f7` (typing authz) |
 
 A test suite now exists (`fdce6b0`) — jest on the backend, vitest on the frontend.
 99 tests green as of `022e7af`. The "no test suite exists" note under Verification
@@ -190,8 +190,16 @@ Deliberately after correctness, so we extract the *fixed* shape.
   narrows the window but doesn't close it — the ordering is the actual bug.
 - **`config/socket.js:156-183`:** replays *every* message ever delivered, unbounded, and does `Chat.findById` inside the loop (N+1 — the sibling at `:199` correctly hoists it). Hoist + bound to last 50 / since-last-seen.
 - **`services/socket.js:54-62`:** `connect_error` only rejects on two exact auth strings; any other failure leaves the promise **pending forever**, so `hasConnected` never flips and the app hangs with no error surfaced. Reject on all, or add a timeout.
-- **Typing authz** (`typingEvents.js:6,37`): no participant check — any authenticated user can inject a fake "X is typing…" into any chatId. Use `socket.rooms.has(chatId)` (free, no DB read per keystroke).
-- **`api.js:33-40`:** logs every request/response body — plaintext message content in the browser console. Delete.
+- ~~**Typing authz**~~ — **DONE** (`56f81f7`). Confirmed exploitable against the
+  running server first: a throwaway account with no chats emitted `typingStart`
+  for a private chat between two other users and a participant received it, with
+  a Redis key written under the outsider's id. Now gated on
+  `socket.rooms.has(chatId)`; rejections are logged but nothing is emitted back.
+- ~~**`api.js:33-40`**~~ — **DONE** (`714005e`). Worse than described here: the
+  token was redacted but `data` was printed verbatim, so login and register put
+  the **plaintext password** in the console alongside the decrypted message
+  content in responses. Both logs deleted; the error log keeps only the server's
+  message string.
 - **Dead frontend code:** `services/encryption.js`, `utils/formatTime.js`, `styles/*.css`, `api.getMessages`, `api.getCurrentUserProfile`, `MainLayout` (no-op), and the unused `on*`/`off*` socket methods — **keep `onMessageError`**, Phase 1b starts using it. Grep before each deletion.
 - **`sortChats` helper** for the block repeated 5× (`ChatContext.jsx:108,210,297,449` — `:405` dies in Phase 2).
 - **Skip:** converting all 12 controllers to `next(err)`. The error middleware at `app.js:62-75` is well-built and unused, but this is a large diff for little gain on a solo project. Convert opportunistically if already editing a file.
