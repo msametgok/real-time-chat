@@ -30,10 +30,13 @@ that table are still the only way to verify realtime behavior.
 The ack-before-broadcast ordering and the unread badge in particular want a
 two-profile pass.
 
-**All five phases have landed.** What remains is verification debt, not work:
-the two-browser pass is still owed for Phases 0–2 and for the two client-side
-Phase 3 behaviours. Everything else has been exercised against the live server
-with scripted Socket.IO clients.
+**All five phases have landed**, plus the `chatError`/`statusError` follow-up
+(`d181602`). What remains is verification debt, not work: the two-browser pass is
+still owed for Phases 0–2 and for the two client-side Phase 3 behaviours.
+Everything else has been exercised against the live server with scripted
+Socket.IO clients, and the error banner was verified in the browser — see
+Verification for how to drive it, since neither error is reachable the obvious
+way.
 
 **Phase 3 is half-verified.** The backend half was driven against the live stack
 with scripted Socket.IO clients (typing wire format + Redis key naming, `newChat`
@@ -209,6 +212,28 @@ Deliberately after correctness, so we extract the *fixed* shape.
 > Verified live: 5/5 on a probe asserting the server emits both events *and*
 > that a rejected join carries `chatId` — without it the bookkeeping repair has
 > nothing to key on.
+>
+> **Verified in the browser** (`d181602`). `connectionError`: sticky, no dismiss
+> button, appears 15s after load. `chatError`: dismissible, auto-clears at 6s,
+> fired on a real server-side rejection — with a second profile as a negative
+> control showing nothing. `statusError` was *not* triggered live; it shares the
+> identical handler→banner path and the probe covers the wire format, so treat it
+> as covered but not observed.
+>
+> Two gaps this verification exposed, neither fixed:
+>
+> - **The join repair has no retry cap.** Each rejection drops the id from
+>   `joinedChatsRef`, so the join is re-attempted on the next `chats` change —
+>   and `chats` changes on every incoming message. The live run produced 3–4
+>   rejections per burst, settling only because the refetch dropped the chat from
+>   the list. Right for a transient failure; for a permanent denial that stays in
+>   the list it is a steady trickle of doomed joins. A per-chat backoff or attempt
+>   cap would close it. This is a trade against the far worse bug it replaced
+>   (never retry → chat dark until reload), not a regression.
+> - **Mid-session socket loss is still silent.** The connect effect is gated on
+>   `!hasConnected`, so a socket that dies *after* connecting sets no
+>   `connectionError`. Socket.IO reconnects underneath, but the UI says nothing
+>   during an outage. Same class as the failures Phase 1b and this change cleared.
 
 - **Double cache invalidation:** `Message.js:65-77` post-save hook and `chatEvents.js:176` both invalidate the same participants. Keep the hook, drop the explicit call.
 - **Phantom `onlineStatus`/`lastSeen`:** not fields on the User model (presence is Redis-only) yet `.select()`ed at 9 sites (`chatController.js:80,100,160,161,194,296` + userController). Cosmetic but misleading — strip. *Partly done in Phase 4:* `issueAuthResponse` (`e37863c`) dropped it from the register/login response, where it had always serialised to `undefined`. The `.select()` sites remain.
@@ -268,6 +293,32 @@ Phases 0–2 are still owed this pass:
 > bypasses the controller; `scripts/createChatViaApi.js` (untracked) hits the
 > endpoint. A "Chat already exists" 200 emits nothing — delete the chat to retest.
 
+> **Driving the RealtimeNotice banner.** Neither error is reachable the obvious
+> way, and both wrong guesses cost a round of testing:
+> **(1)** *You cannot test `connectionError` by stopping the backend.* Every path
+> to `isAuthenticated` goes through HTTP — login posts to the API, and a reload
+> calls `/api/users/profile` and logs you out if it fails — so with the server
+> down you never reach the screen that renders the banner. It needs **HTTP
+> healthy, socket broken**: put `VITE_SOCKET_URL=http://localhost:5999` in
+> `frontend/.env.local` (gitignored, Vite auto-restarts, `VITE_API_URL` is a
+> separate var so the API keeps working). Then **wait the full 15s** —
+> `CONNECT_TIMEOUT_MS`. A blocked transport is not a fatal auth error, so the
+> promise only rejects at the timeout. The text is *"Could not reach the server
+> within 15s."*, not the generic fallback.
+> **(2)** *DevTools request blocking does not work here.* It does not apply to
+> WebSocket handshakes, and the client tries `websocket` first — the pattern
+> matches nothing and the socket connects normally ("0 blocked" is the tell).
+> **(3)** For `chatError`, remove the user from a chat's `participants` in Mongo,
+> then `touch backend/server.js` to make nodemon restart and drop every socket.
+> The client re-emits `joinChat` from its **in-memory** list — that happens before
+> the HTTP refetch, which is why the stale entry is still there to be rejected.
+> Restore the participant afterwards. Expect the banner to fire early too, on any
+> `chats` change between the removal and the restart.
+> **(4)** *Check which account the browser is actually on* before targeting a
+> chat. `samet` is `sam@example.com`; `samet@test.com` is a different user,
+> `samet9601`. Confirm against `logs/error.log` — the join lines name the user —
+> and keep the second profile open as a negative control.
+
 | Phase | Check |
 |---|---|
 | 0 | Server logs show `messageDeliveredToClient` firing; single ticks become double on delivery |
@@ -277,6 +328,7 @@ Phases 0–2 are still owed this pass:
 | 2 | Send 1 message to an inactive chat → badge reads exactly **1**, not 3. Send twice from A → your own badge stays 0. Have B read → A's badge doesn't rise. Send "ok" twice fast → correct order |
 | 3 | **Backend half done** (scripted socket clients). Still owed in a browser: type in chat1, switch to chat2 → no stuck indicator; click chat A then B fast **under Slow 3G** → B shows B's messages |
 | 4/5 | Full regression of the above — these phases should be behavior-neutral |
+| post-5 | **Banner done** (`d181602`): `connectionError` sticky at 15s, `chatError` dismissible and auto-clearing at 6s, negative control clean. `statusError` still unobserved in a browser |
 
 Commit one phase at a time (one helper per commit in Phase 4) so any regression bisects cleanly. **Phases 0–3 contain all user-visible breakage; 4–5 are debt.**
 
