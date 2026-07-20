@@ -1,6 +1,7 @@
-const {body, query, param, validationResult} = require('express-validator');
+﻿const {body, query, param} = require('express-validator');
 const User = require('../models/User');
 const logger = require('../config/logger');
+const { handleValidation } = require('../utils/validate');
 
 
 // Get user profile
@@ -21,11 +22,8 @@ exports.getCurrentUserProfile = async (req, res) => {
 // Get another user's public profile
 exports.getUserPublicProfile = [
     param('userId').isMongoId().withMessage('Invalid user ID format'),
+    handleValidation,
     async (req, res) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array({onlyFirstError: true}) });
-        }
         try {
             const user = await User.findById(req.params.userId).select('username avatar onlineStatus lastSeen').lean();
 
@@ -56,12 +54,9 @@ exports.updateCurrentUserProfile = [
         .if((value, {req}) => 
             req.body.avatar !== null && req.body.avatar !== ''
         ).isURL().withMessage('Avatar must be a valid URL if provided Use null or an empty string to remove it'),
-    
+    handleValidation,
+
     async (req, res) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array({onlyFirstError: true}) });
-        }
 
         const userId = req.user.userId;
         const { username, email, password, currentPassword, avatar } = req.body;
@@ -145,12 +140,9 @@ exports.searchUsers = [
     query('keyword').optional().trim().escape(),
     query('limit').optional().isInt({ min: 1, max: 50 }).toInt(),
     query('page').optional().isInt({ min: 1 }).toInt(),
+    handleValidation,
 
     async (req, res) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array({onlyFirstError: true}) });
-        }
 
         const currentUserId = req.user.userId;
         const keyword = req.query.keyword || '';

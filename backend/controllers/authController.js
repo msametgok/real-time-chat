@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
-const { body, validationResult } = require("express-validator");
+const { body } = require("express-validator");
 const User = require("../models/User");
+const { handleValidation } = require("../utils/validate");
 
 require("dotenv").config();
 
@@ -42,14 +43,10 @@ exports.register = [
   body("password")
     .isLength({ min: 6 })
     .withMessage("Password must be at least 6 characters long"),
+  handleValidation,
 
   async (req, res) => {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ message: errors.array()[0].msg });
-      }
-
       const { username, email, password } = req.body;
 
       //Check if user already exists
@@ -74,14 +71,10 @@ exports.register = [
 exports.login = [
   body("email").isEmail().normalizeEmail().withMessage("Please enter a valid email address."),
   body("password").notEmpty().withMessage("Password is required"),
+  handleValidation,
 
   async (req, res) => {
     try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ message: errors.array()[0].msg });
-      }
-
       const { email, password } = req.body;
 
       const user = await User.findOne({ email: email.toLowerCase() });

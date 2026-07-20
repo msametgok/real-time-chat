@@ -1,4 +1,5 @@
-const {body, param, query, validationResult} = require('express-validator');
+﻿const {body, param, query} = require('express-validator');
+const { handleValidation } = require('../utils/validate');
 const mongoose = require('mongoose');
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
@@ -79,12 +80,9 @@ exports.createOneOnOneChat = [
         .trim()
         .notEmpty().withMessage('otherUserId is required')
         .isMongoId().withMessage('Invalid ID format'),
+    handleValidation,
 
     async (req, res) => {
-        const errors = validationResult(req);
-        if(!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array({onlyFirstError: true}) });
-        }
 
         const currentUserId = req.user.userId;
         const { otherUserId } = req.body;
@@ -158,12 +156,9 @@ exports.createGroupChat = [
         .withMessage('At least one other participant is required for a group chat')
         .custom( value => value.every( id => mongoose.Types.ObjectId.isValid(id)))
         .withMessage('Invalid participant ID format found in the list'),
-        
+    handleValidation,
+
     async (req, res) => {
-        const errors = validationResult(req);
-        if(!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array({onlyFirstError: true}) });
-        }
 
         const currentUserId = req.user.userId;
         const { chatName, participantIds } = req.body;
@@ -257,12 +252,9 @@ exports.getChatMessages = [
     query('before').optional().isISO8601().withMessage('Invalid "before" timestamp format. Please use ISO8601.').toDate(),
     // Validate 'limit' for number of messages to fetch
     query('limit').optional().isInt({ min: 1, max: 50 }).toInt().withMessage('Limit must be an integer between 1 and 50.'),
+    handleValidation,
 
     async (req, res) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array({ onlyFirstError: true }) });
-        }
 
         const { chatId } = req.params;
         const currentUserId = req.user.userId;
@@ -319,11 +311,8 @@ exports.getChatMessages = [
 
 exports.getChatDetails = [
     param('chatId').isMongoId().withMessage('Invalid Chat ID format.'),
+    handleValidation,
     async (req, res) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array({ onlyFirstError: true }) });
-        }
         const { chatId } = req.params;
         const currentUserId = req.user.userId;
 
@@ -355,11 +344,8 @@ exports.getChatDetails = [
 // 6. Delete a Chat (for 1-on-1) or Leave a Group Chat
 exports.deleteOrLeaveChat = [
     param('chatId').isMongoId().withMessage('Invalid Chat ID format.'),
+    handleValidation,
     async (req, res) => {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array({ onlyFirstError: true }) });
-        }
 
         const { chatId } = req.params;
         const currentUserId = req.user.userId;
