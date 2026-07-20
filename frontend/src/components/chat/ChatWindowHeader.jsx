@@ -80,7 +80,13 @@ function ChatWindowHeader() {
   const { displayChatName, chatAvatar, isGroupChat } = activeChat;
 
   return (
-    <header className="flex items-center justify-between py-3 px-4 bg-slate-800 backdrop-blur-sm shadow-sm border-b border-slate-700">
+    // `relative z-30` is load-bearing, not decoration. backdrop-blur-sm sets
+    // backdrop-filter, and any value other than `none` makes this header a
+    // stacking context - which traps the options menu's z-20 INSIDE it. The
+    // menu then painted behind MessageList (a later sibling), so over a long
+    // chat the dropdown, and worse the red confirm button, were buried under
+    // the message bubbles and only clickable through the gaps between them.
+    <header className="relative z-30 flex items-center justify-between py-3 px-4 bg-slate-800 backdrop-blur-sm shadow-sm border-b border-slate-700">
       {/* Left side: back button (<md) + avatar */}
       <div className="flex items-center space-x-3">
         {/* Back arrow only on screens narrower than md */}
