@@ -1,4 +1,6 @@
 // src/socketHandlers/disconnectEvents.js
+const { syncUserSockets, recordLastSeen } = require('../utils/presence');
+
 module.exports = ({ io, socket, logger, redis, Chat }) => {
   // Automatically emitted when a client disconnects
   socket.on('disconnect', async (reason) => {
@@ -10,17 +12,11 @@ module.exports = ({ io, socket, logger, redis, Chat }) => {
       }
 
       const { userId, username } = socket.user;
-      const socketKey = `userSockets:${userId}`;
 
       logger.info(`User ${username} (ID: ${userId}) disconnected (Socket: ${socket.id}). Reason: ${reason}`);
 
       // Prune stale socket IDs in Redis
-      const liveSockets = await io.in(`user-${userId}`).allSockets();
-      await redis.del(socketKey);
-      if (liveSockets.size) {
-        await redis.sadd(socketKey, ...Array.from(liveSockets));
-      }
-      const remaining = await redis.scard(socketKey);
+      const remaining = await syncUserSockets(io, redis, userId);
       logger.debug(`After prune, user ${username} has ${remaining} active sockets.`);
 
       // If no sockets remain, broadcast offline status to all chats
@@ -28,8 +24,7 @@ module.exports = ({ io, socket, logger, redis, Chat }) => {
         const rooms = await Chat.find({ participants: userId }).select('_id').lean();
 
         // Persist last seen timestamp in Redis
-        const lastSeenStr = new Date().toISOString();
-        await redis.set(`userLastSeen:${userId}`, lastSeenStr);
+        const lastSeenStr = await recordLastSeen(redis, userId);
 
         rooms.forEach(({ _id: chatId }) => {
           io.to(chatId.toString()).emit('userStatusUpdate', {

@@ -16,6 +16,7 @@ const initializeStatusEventHandlers = require('../socketHandlers/statusEvents');
 const initializeDisconnectHandlers = require('../socketHandlers/disconnectEvents');
 const { invalidateChatCache } = require('../utils/chatCache');
 const { computeDeliveredToAll, computeReadByAll } = require('../utils/messageStatus');
+const { syncUserSockets } = require('../utils/presence');
 
 // Held at module scope so non-socket code (HTTP controllers) can broadcast.
 // Anything that reads this must tolerate `null` - it is unset until the server
@@ -63,11 +64,7 @@ const initializeSocket = async (server) => {
 
       // 1) Join personal room and prune stale sockets
       socket.join(`user-${userId}`);
-      const socketKey = `userSockets:${userId}`;
-      const liveSockets = await io.in(`user-${userId}`).allSockets();
-      await redis.del(socketKey);
-      if (liveSockets.size) await redis.sadd(socketKey, ...Array.from(liveSockets));
-      const openCount = await redis.scard(socketKey);
+      const openCount = await syncUserSockets(io, redis, userId);
       logger.debug(`Presence pruning: user ${userId} has ${openCount} live sockets`);
 
       // 2) Auto-join all chat rooms
