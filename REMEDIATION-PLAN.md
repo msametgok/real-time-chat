@@ -26,25 +26,28 @@ A test suite now exists (`fdce6b0`) — jest on the backend, vitest on the front
 below is obsolete; unit tests cover handler logic, but the two-browser checks in
 that table are still the only way to verify realtime behavior.
 
-**Phases 0–2 have not yet been verified in the real app** — only by unit test.
-The ack-before-broadcast ordering and the unread badge in particular want a
-two-profile pass.
+**Phases 0–2 are verified in the real app.** The two-browser pass was run on
+2026-07-20 against a purpose-made 1-on-1 between `samet9601` and `mehmet`
+(`6a5dc087…` — kept deliberately; the only chat those two shared was a 3-person
+group, which is useless for tick tests because "delivered to all" waits on a
+third participant who is never online). Five of six checks passed outright; the
+sixth found a real defect, now fixed in `e7b0904`. See the table below.
 
 **All five phases have landed**, plus the `chatError`/`statusError` follow-up
-(`d181602`). What remains is verification debt, not work: the two-browser pass is
-still owed for Phases 0–2 and for the two client-side Phase 3 behaviours.
-Everything else has been exercised against the live server with scripted
-Socket.IO clients, and the error banner was verified in the browser — see
-Verification for how to drive it, since neither error is reachable the obvious
-way.
+(`d181602`) and the Mongo timeout fix the pass turned up (`e7b0904`). **No
+verification is outstanding.**
 
-**Phase 3 is half-verified.** The backend half was driven against the live stack
-with scripted Socket.IO clients (typing wire format + Redis key naming, `newChat`
-delivery to recipients and to the creator's other sessions, and a new chat being
-immediately usable once the client joins the room — with a negative control
-confirming that join is load-bearing). The two client-side behaviors — the typing
-indicator on chat switch, and the `selectChat` race — are still unit-test-only.
-The race needs network throttling to hit at all.
+**Phase 3 is verified except the race.** The backend half was driven against the
+live stack with scripted Socket.IO clients (typing wire format + Redis key
+naming, `newChat` delivery to recipients and to the creator's other sessions, and
+a new chat being immediately usable once the client joins the room — with a
+negative control confirming that join is load-bearing). The typing indicator was
+confirmed in the browser in both directions: it clears on chat switch **and** does
+not leak into a chat you are not typing in. Those are two halves of one fix —
+passing only the first would mean the handler is swallowing the stop event, which
+is exactly the bug an earlier attempt introduced. The `selectChat` race is also
+confirmed, with a negative control — see below, because the obvious way to test
+it silently cannot work.
 
 ---
 
@@ -276,7 +279,25 @@ Deliberately after correctness, so we extract the *fixed* shape.
 Unit tests cover handler logic (`npm test` in both packages), but realtime
 behavior needs the real app. Drive it (`npm run dev` in both `backend/` and
 `frontend/`) with **two browser profiles**, checking these after each phase.
-Phases 0–2 are still owed this pass:
+Phases 0–2 were run this way on 2026-07-20; only the `selectChat` race is left.
+
+> **Setting up the pass.** Use a **1-on-1** chat, not a group. In a group,
+> "delivered to all" and "read by all" wait on every other participant, so an
+> offline third member leaves the ticks permanently single and check 0 reads as a
+> failure when nothing is wrong. `scripts/createChat.js <userA> <userB>` makes one
+> and invalidates the chat cache; both windows pick it up on refresh.
+>
+> Check which accounts your two windows are actually logged in as before
+> targeting anything — `logs/error.log` names the user on every join line. `samet`
+> is `sam@example.com`; `samet@test.com` is a *different* user, `samet9601`.
+>
+> For check 1a/1b, MongoDB here is a local service: `net stop MongoDB` from an
+> **elevated** prompt, `net start MongoDB` after. **Don't reload either window
+> while it's stopped** — socket auth does a `User.findById` on every connect and
+> the profile fetch hits the DB, so a refresh logs you out and you end up
+> debugging the wrong thing. Expect no banner on this one: `messageError`
+> deliberately doesn't feed `RealtimeNotice` (the failed bubble with Retry is the
+> surface), so an absent banner is correct, not a miss.
 
 > **Scripting the backend half.** Anything that doesn't involve rendering can be
 > driven far faster than by clicking: connect two `socket.io-client` instances
@@ -319,16 +340,60 @@ Phases 0–2 are still owed this pass:
 > `samet9601`. Confirm against `logs/error.log` — the join lines name the user —
 > and keep the second profile open as a negative control.
 
-| Phase | Check |
-|---|---|
-| 0 | Server logs show `messageDeliveredToClient` firing; single ticks become double on delivery |
-| 1a/1b | Stop MongoDB mid-send → bubble shows a **failed** state, not a permanent "sending" spinner |
-| 1c | Kill wifi on tab B, send 3 messages from A, restore → all 3 appear **without reload** |
-| 1d | Type continuously in A → B shows a *steady* indicator that clears ~2s after you stop, no flicker |
-| 2 | Send 1 message to an inactive chat → badge reads exactly **1**, not 3. Send twice from A → your own badge stays 0. Have B read → A's badge doesn't rise. Send "ok" twice fast → correct order |
-| 3 | **Backend half done** (scripted socket clients). Still owed in a browser: type in chat1, switch to chat2 → no stuck indicator; click chat A then B fast **under Slow 3G** → B shows B's messages |
-| 4/5 | Full regression of the above — these phases should be behavior-neutral |
-| post-5 | **Banner done** (`d181602`): `connectionError` sticky at 15s, `chatError` dismissible and auto-clearing at 6s, negative control clean. `statusError` still unobserved in a browser |
+| Phase | Check | Result (2026-07-20) |
+|---|---|---|
+| 0 | Server logs show `messageDeliveredToClient` firing; single ticks become double on delivery | **pass** |
+| 1a/1b | Stop MongoDB mid-send → bubble shows a **failed** state, not a permanent "sending" spinner | **pass after `e7b0904`** — see note below |
+| 1c | Kill wifi on tab B, send 3 messages from A, restore → all 3 appear **without reload** | **pass** |
+| 1d | Type continuously in A → B shows a *steady* indicator that clears ~2s after you stop, no flicker | **pass** |
+| 2 | Send 1 message to an inactive chat → badge reads exactly **1**, not 3. Send twice from A → your own badge stays 0. Have B read → A's badge doesn't rise. Send "ok" twice fast → correct order | **pass**, all four parts |
+| 3 | type in chat1, switch to chat2 → no stuck indicator **and** no leak into the chat you're viewing; click a **slow** chat then a fast one → the fast one's messages stay | typing **pass** both directions; race **pass** with a negative control |
+| 4/5 | Full regression of the above — these phases should be behavior-neutral | **pass** (no regressions seen) |
+| post-5 | Banner (`d181602`): `connectionError` sticky at 15s, `chatError` dismissible and auto-clearing at 6s, negative control clean | **pass**; `statusError` still unobserved |
+
+> **Network throttling cannot test the `selectChat` race.** This looks like the
+> obvious tool and it is the wrong one — the original instruction in this file
+> said "Slow 3G", and following it produces a confident false pass.
+>
+> Throttling adds *symmetric* latency. Request 1 leaves at t=0 and returns ~2s
+> later; request 2 leaves at t=200ms and returns ~2.2s later. Responses come back
+> **in the order they were sent**, so the second click wins on its own and the
+> race never fires. Slow 3G widens the window but never inverts the order — and
+> inversion is the entire bug. Clicking between two chats under Slow 3G looks
+> perfect *with the guard removed*.
+>
+> To test it, make one response genuinely slower than the other. A four-line
+> middleware in `chatRoutes.js` that delays `/:chatId/messages` for one hardcoded
+> chat id by 4s does it deterministically, with throttling off: click the slow
+> chat, then a fast one, and watch past the delay.
+>
+> **Run the negative control first.** Comment out the `fetchSeqRef` guard in
+> `fetchMessages` and confirm you can see the bug — the fast chat's messages
+> appear, then get replaced by the slow chat's, while the header still names the
+> fast one. Only once that reproduces does restoring the guard prove anything.
+> Both edits are one line each and revert cleanly.
+>
+> The general lesson: a passing realtime check is worth nothing until you have
+> shown the setup can *fail*. This one passed convincingly before it was testing
+> anything at all.
+
+> **What check 1a/1b actually found.** The failed bubble and its Retry did
+> appear, and Retry correctly reused the tempId rather than duplicating the
+> message — so the Phase 1a/1b fix itself was sound. But it took **30 seconds**,
+> and for that whole window the UI was indistinguishable from a healthy slow
+> send. It read as a failing test rather than a slow one.
+>
+> Cause: `config/db.js` passed only `maxPoolSize`, leaving
+> `serverSelectionTimeoutMS` at the driver's 30s default, so the send sat in
+> server selection until it expired. Measured against a dead port with the same
+> options: **30.0s before, 5.0s after**. Fixed in `e7b0904` and re-confirmed in
+> the browser — failure now surfaces at ~5s and Retry delivers once Mongo is back.
+>
+> Worth remembering when reading a result like this: the restart *looked* like
+> the trigger for the red bubble, but it wasn't. The 30s timeout expiring was,
+> and it merely coincided with the restart. Had Mongo genuinely returned before
+> the expiry, server selection would have succeeded and the message would have
+> sent normally.
 
 Commit one phase at a time (one helper per commit in Phase 4) so any regression bisects cleanly. **Phases 0–3 contain all user-visible breakage; 4–5 are debt.**
 
