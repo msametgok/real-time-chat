@@ -124,12 +124,23 @@ Scripted `socket.io-client` probes cover what the browser can't easily reach (re
 
 ## Current state
 
-The app works end-to-end but is mid-remediation. `REMEDIATION-PLAN.md` in the repo root documents known logic errors and redundancy in phases 0–5 — **read it before touching** `socketHandlers/`, `config/socket.js`, or `contexts/ChatContext.jsx`, since several behaviors there are known-broken and slated to change.
+**The remediation is finished.** All of Phases 0–5 have landed, plus two follow-ups: the `chatError`/`statusError` client gap (`d181602`) and a Mongo server-selection timeout (`e7b0904`). Everything is unit-tested *and* verified in the real app — the two-browser pass was run on 2026-07-20 and no verification is outstanding.
 
-**Phases 0–2 are done** (delivery pipeline restored, failed sends surfaced, reconnect resync, `chatListUpdate` deleted, ack-before-broadcast reconciliation, unread badge). Phase 3 is done but **uncommitted** (typing state now keyed by chatId, `selectChat` fetch race guarded by a sequence ref, `newChat` emitted over the socket on chat creation). All of 0–3 are unit-tested but **not yet verified in the real app**. Phases 4–5 are debt. The plan file carries a per-phase status table.
+`REMEDIATION-PLAN.md` is tracked in the repo root. Its phase-by-phase detail is now history, but two parts stay useful: the **verification recipes** (how to drive the error banner, why network throttling cannot test the `selectChat` race, the two-browser setup traps) and the record of where the plan's own instructions turned out to be **wrong**. Read it before writing a realtime test — several obvious approaches there are documented as producing confident false passes.
 
-Two conventions Phase 3 introduced: `config/socket.js` exports `{ initializeSocket, getIO }` — use `getIO()` (null-tolerant) to broadcast from HTTP controllers. And `typingUsers` in `ChatContext` is keyed **`{ [chatId]: { [userId]: {username} } }`**; the handler records every chat and the view filters by `activeChat._id`, because gating in the handler also swallowed the stop event.
+Conventions worth knowing, all introduced during the remediation:
+- `config/socket.js` exports `{ initializeSocket, getIO }` — use `getIO()` (null-tolerant) to broadcast from HTTP controllers.
+- `typingUsers` in `ChatContext` is keyed **`{ [chatId]: { [userId]: {username} } }`**; the handler records every chat and the view filters by `activeChat._id`, because gating in the handler also swallowed the stop event.
+- Socket handlers are registered **before** any `await` in the connection bootstrap. Moving them back down re-opens a window where a freshly-connected client's emits hit a socket with no listener and vanish.
+- Realtime errors surface through `RealtimeNotice`, not through ChatList's `chatError` state — that one renders *instead of* the sidebar.
 
-That file is scratch and will be deleted once the phases land. It is now in `.gitignore` along with `.vscode/`.
+### Known bugs, not yet fixed
+
+Both were found during verification and deliberately left; neither is a regression.
+
+1. **Mid-session socket loss is silent.** The connect effect in `ChatContext` is gated on `!hasConnected`, so a socket that dies *after* connecting sets no `connectionError`. Socket.IO reconnects underneath, but during an outage the UI gives no indication at all. `connectionError` currently only covers the *initial* connect.
+2. **The join repair has no retry cap.** `handleChatError` drops the chat id from `joinedChatsRef` so a rejected `joinChat` is re-attempted — correct for a transient failure, but the retry rides on `chats` changing, and `chats` changes on every incoming message. A permanently-denied chat that stayed in the list would produce a steady trickle of doomed joins. Bounded in practice only because the refetch drops the chat. A per-chat backoff or attempt cap would close it.
 
 Known-incomplete features: file/image upload (`multer` is installed, no route), group chat admin actions, and message edit/delete.
+
+`backend/scripts/createChat.js` and `createChatViaApi.js` are intentionally **untracked** dev helpers — `createChat.js` writes straight to Mongo (no `newChat` emit); `createChatViaApi.js` goes through the controller. Don't `git add -A` them in.
