@@ -185,6 +185,81 @@ describe('chatListUpdate removal', () => {
     });
 });
 
+describe('delivery receipts for online participants', () => {
+    /** Make `user-2` look connected so the delivery loop actually runs. */
+    const bringParticipantOnline = h => {
+        h.io.in.mockReturnValue({
+            allSockets: jest.fn().mockResolvedValue(new Set(['socket-2']))
+        });
+    };
+
+    it('broadcasts messageDeliveryUpdate when the participant is newly delivered to', async () => {
+        const h = buildHarness();
+        primeSuccessfulSend(h);
+        bringParticipantOnline(h);
+        h.Message.findOneAndUpdate.mockReturnValue(
+            lean({ sender: 'user-1', deliveredTo: ['user-2'] })
+        );
+
+        await h.handlers.sendMessage({
+            chatId, messageType: 'text', content: 'hello', tempId: 'temp-abc'
+        });
+
+        const [update] = h.find('messageDeliveryUpdate');
+        expect(update.payload.deliveredToUserId).toBe('user-2');
+        // user-2 is the only participant besides the sender, so this completes it.
+        expect(update.payload.deliveredToAll).toBe(true);
+    });
+
+    // findOneAndUpdate carries a `deliveredTo: { $ne: participantId }` guard, so
+    // it returns null whenever the participant is ALREADY in deliveredTo. The
+    // code dereferenced it unconditionally: `updatedMsg.sender` threw, the catch
+    // block masked it, and invalidateChatCache at the end of the handler was
+    // skipped entirely - every participant's cached chat list stayed stale for
+    // the full 300s TTL. Silent: the message itself sent fine.
+    it('skips the participant when nothing changed, without throwing', async () => {
+        const h = buildHarness();
+        primeSuccessfulSend(h);
+        bringParticipantOnline(h);
+        h.Message.findOneAndUpdate.mockReturnValue(lean(null)); // already delivered
+
+        await h.handlers.sendMessage({
+            chatId, messageType: 'text', content: 'hello', tempId: 'temp-abc'
+        });
+
+        expect(h.find('messageDeliveryUpdate')).toHaveLength(0);
+        expect(h.events()).not.toContain('messageError');
+        expect(h.logger.error).not.toHaveBeenCalled();
+    });
+
+    it('still invalidates the chat cache when a participant is skipped', async () => {
+        const h = buildHarness();
+        primeSuccessfulSend(h);
+        bringParticipantOnline(h);
+        h.Message.findOneAndUpdate.mockReturnValue(lean(null));
+
+        await h.handlers.sendMessage({
+            chatId, messageType: 'text', content: 'hello', tempId: 'temp-abc'
+        });
+
+        expect(h.invalidateChatCache).toHaveBeenCalledWith(participantChat.participants);
+    });
+
+    it('delivers the message to the room even when the receipt is skipped', async () => {
+        const h = buildHarness();
+        primeSuccessfulSend(h);
+        bringParticipantOnline(h);
+        h.Message.findOneAndUpdate.mockReturnValue(lean(null));
+
+        await h.handlers.sendMessage({
+            chatId, messageType: 'text', content: 'hello', tempId: 'temp-abc'
+        });
+
+        expect(h.find('messageSentAck')).toHaveLength(1);
+        expect(h.find('newMessage')).toHaveLength(1);
+    });
+});
+
 describe('sendMessage failure paths still reach the sender', () => {
     it('emits messageError with tempId when the chat is not the user\'s', async () => {
         const h = buildHarness();

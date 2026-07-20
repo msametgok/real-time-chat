@@ -164,6 +164,14 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, 
                         { new: true, select: 'sender deliveredTo' }
                     ).lean();
 
+                    // The $ne guard means this returns NULL when the participant
+                    // is already in deliveredTo - i.e. nothing changed, so there
+                    // is nothing to broadcast. Dereferencing it threw, the catch
+                    // threw again on the hoisted vars, and invalidateChatCache
+                    // below never ran - leaving every participant's sidebar stale
+                    // for the full 300s TTL.
+                    if (!updatedMsg) continue;
+
                     // Compute whether *all* other participants have now received it
                     const senderId = updatedMsg.sender.toString();
                     const otherIds = chat.participants
