@@ -65,6 +65,8 @@ const buildHarness = ({ userId = 'user-1', username = 'alice' } = {}) => {
 };
 
 const lean = value => ({ lean: jest.fn().mockResolvedValue(value) });
+// findChatForParticipant chains .select(...).lean()
+const selectLean = value => ({ select: jest.fn().mockReturnValue(lean(value)) });
 const populateLean = value => ({
     populate: jest.fn().mockReturnValue(lean(value))
 });
@@ -85,7 +87,7 @@ const populatedMessage = {
 };
 
 const primeSuccessfulSend = h => {
-    h.Chat.findOne.mockReturnValue(lean(participantChat));
+    h.Chat.findOne.mockReturnValue(selectLean(participantChat));
     h.Message.findById.mockReturnValue(populateLean({ ...populatedMessage }));
 };
 
@@ -263,7 +265,7 @@ describe('delivery receipts for online participants', () => {
 describe('sendMessage failure paths still reach the sender', () => {
     it('emits messageError with tempId when the chat is not the user\'s', async () => {
         const h = buildHarness();
-        h.Chat.findOne.mockReturnValue(lean(null));
+        h.Chat.findOne.mockReturnValue(selectLean(null));
 
         await h.handlers.sendMessage({
             chatId, messageType: 'text', content: 'hello', tempId: 'temp-abc'
@@ -276,7 +278,7 @@ describe('sendMessage failure paths still reach the sender', () => {
 
     it('emits messageError with tempId when the DB write throws', async () => {
         const h = buildHarness();
-        h.Chat.findOne.mockReturnValue(lean(participantChat));
+        h.Chat.findOne.mockReturnValue(selectLean(participantChat));
         h.Message.mockImplementation(() => ({
             save: jest.fn().mockRejectedValue(new Error('mongo down'))
         }));

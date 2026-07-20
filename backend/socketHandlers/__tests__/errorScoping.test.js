@@ -131,7 +131,8 @@ describe('sendMessage error payloads carry tempId', () => {
             socket,
             logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
             redis: {},
-            Chat: { findOne: () => ({ lean: async () => null }) },
+            // findChatForParticipant chains .select(...).lean()
+            Chat: { findOne: () => ({ select: () => ({ lean: async () => null }) }) },
             Message: {},
             encrypt: v => v, decrypt: v => v,
             invalidateChatCache: jest.fn()

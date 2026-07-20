@@ -1,4 +1,5 @@
 const { computeDeliveredToAll, computeReadByAll } = require('../utils/messageStatus');
+const { findChatForParticipant } = require('../utils/chatAuth');
 
 module.exports = ({ io, socket, logger, redis, Message, Chat }) => {
 
@@ -25,8 +26,8 @@ module.exports = ({ io, socket, logger, redis, Message, Chat }) => {
             }
 
             // 1. Verify the user is a participant of the chat
-            const chat = await Chat.findById(chatId).select('participants').lean(); // Only need participants
-            if (!chat || !chat.participants.map(p => p.toString()).includes(readerId)) {
+            const chat = await findChatForParticipant(Chat, chatId, readerId);
+            if (!chat) {
                 logger.warn(`${readerName} 'markMessagesAsRead' for unauthorized/non-existent chat ${chatId}.`);
                 return socket.emit('statusError', { chatId, message: 'Access denied or chat not found.' });
             }

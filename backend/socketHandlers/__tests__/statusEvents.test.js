@@ -1,4 +1,4 @@
-const initializeStatusEventHandlers = require('../statusEvents');
+﻿const initializeStatusEventHandlers = require('../statusEvents');
 
 /**
  * Builds a fake `deps` object matching what config/socket.js passes in,
@@ -32,7 +32,9 @@ const buildHarness = ({ userId = 'user-1', username = 'alice' } = {}) => {
         find: jest.fn()
     };
 
-    const Chat = { findById: jest.fn() };
+    // findById: still used directly by messageDeliveredToClient.
+    // findOne: used by findChatForParticipant, which gates markMessagesAsRead.
+    const Chat = { findById: jest.fn(), findOne: jest.fn() };
 
     const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
 
@@ -202,14 +204,28 @@ describe('messageDeliveredToClient', () => {
 describe('markMessagesAsRead', () => {
     const chatId = 'chat-1';
 
+    // The participant filter is now part of the query, so a non-participant
+    // gets null back rather than a chat they then fail a check against.
     it('rejects a non-participant', async () => {
         const h = buildHarness();
-        h.Chat.findById.mockReturnValue(selectLean({ participants: ['user-2', 'user-3'] }));
+        h.Chat.findOne.mockReturnValue(selectLean(null));
 
         await h.handlers.markMessagesAsRead({ chatId, messageIds: ['m1'] });
 
         expect(h.socketEmits[0].event).toBe('statusError');
         expect(h.Message.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('scopes the lookup to the reader, not just the chat id', async () => {
+        const h = buildHarness();
+        h.Chat.findOne.mockReturnValue(selectLean(null));
+
+        await h.handlers.markMessagesAsRead({ chatId, messageIds: ['m1'] });
+
+        expect(h.Chat.findOne).toHaveBeenCalledWith({
+            _id: chatId,
+            participants: 'user-1'
+        });
     });
 
     it('rejects an empty or malformed messageIds array', async () => {
@@ -225,7 +241,7 @@ describe('markMessagesAsRead', () => {
 
     it('broadcasts messagesReadUpdate and acks when messages were updated', async () => {
         const h = buildHarness();
-        h.Chat.findById.mockReturnValue(selectLean({ participants: ['user-1', 'user-2'] }));
+        h.Chat.findOne.mockReturnValue(selectLean({ participants: ['user-1', 'user-2'] }));
         h.Message.updateMany.mockResolvedValue({ modifiedCount: 2 });
         h.Message.find.mockReturnValue(selectLean([
             { _id: 'm1', sender: 'user-2', readBy: ['user-1'] },
@@ -244,7 +260,7 @@ describe('markMessagesAsRead', () => {
 
     it('still acks (with 0) when nothing needed updating', async () => {
         const h = buildHarness();
-        h.Chat.findById.mockReturnValue(selectLean({ participants: ['user-1', 'user-2'] }));
+        h.Chat.findOne.mockReturnValue(selectLean({ participants: ['user-1', 'user-2'] }));
         h.Message.updateMany.mockResolvedValue({ modifiedCount: 0 });
 
         await h.handlers.markMessagesAsRead({ chatId, messageIds: ['m1'] });

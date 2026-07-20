@@ -1,4 +1,5 @@
 const { computeDeliveredToAll } = require('../utils/messageStatus');
+const { findChatForParticipant } = require('../utils/chatAuth');
 
 // Destructure dependencies passed from main socket.js
 module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, invalidateChatCache }) => {
@@ -20,7 +21,7 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, 
                 return socket.emit('chatError', { message: 'Chat ID is required to join.' });
             }
             // Verify chat exists and user is a participant
-            const chat = await Chat.findOne({ _id: chatId, participants: userId }).lean();
+            const chat = await findChatForParticipant(Chat, chatId, userId);
 
             if (!chat) {
                 logger.warn(`User ${username} (Socket: ${socket.id}) failed to join chat ${chatId}: Not a participant or chat does not exist.`);
@@ -86,7 +87,7 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, 
             }
 
             // Verify user is part of the chat
-            const chat = await Chat.findOne({ _id: chatId, participants: userId }).lean();
+            const chat = await findChatForParticipant(Chat, chatId, userId);
             if (!chat) {
                 logger.warn(`Unauthorized sendMessage by ${username} to ${chatId}`);
                 return socket.emit('messageError', { chatId, tempId, message: 'Access denied.' });

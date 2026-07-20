@@ -8,6 +8,7 @@ const logger = require('../config/logger');
 const { decrypt } = require('../utils/encryption');
 const { invalidateChatCache } = require('../utils/chatCache');
 const { getIO } = require('../config/socket');
+const { isParticipant, findChatForParticipant } = require('../utils/chatAuth');
 
 const formatChatResponse = (chat, currentUserId) => {
     if (!chat) return null;
@@ -273,7 +274,7 @@ exports.getChatMessages = [
 
         try {
             // Verify the current user is a participant of the chat
-            const chat = await Chat.findOne({ _id: chatId, participants: currentUserId });
+            const chat = await findChatForParticipant(Chat, chatId, currentUserId);
             if (!chat) {
                 return res.status(403).json({ message: 'Access Denied: You are not a participant of this chat or chat does not exist.' });
             }
@@ -370,7 +371,9 @@ exports.deleteOrLeaveChat = [
                 return res.status(404).json({ message: 'Chat not found.' });
             }
 
-            if (!chat.participants.some(p_obj => p_obj.equals(currentUserId))) {
+            // Not findChatForParticipant: this handler mutates the chat and
+            // saves it, so it needs a hydrated document, not a lean object.
+            if (!isParticipant(chat, currentUserId)) {
                 return res.status(403).json({ message: 'Access Denied: You are not a participant of this chat.' });
             }
 
