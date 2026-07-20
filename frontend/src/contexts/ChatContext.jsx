@@ -729,7 +729,28 @@ const handleMessageDeliveryUpdate = useCallback(
     const sock = socketService.getSocket();
     if (!sock) return;
 
+    // A socket that dies AFTER connecting used to be completely silent: the
+    // connect effect is gated on `!hasConnected`, so nothing set an error and
+    // the UI looked healthy while every emit was being dropped. Surface it
+    // here instead - this listener is attached for the whole session.
+    const handleDisconnect = reason => {
+      // Our own teardown (logout, unmount) is not an outage.
+      if (reason === 'io client disconnect') return;
+
+      if (reason === 'io server disconnect') {
+        // Socket.IO does NOT auto-reconnect in this case. Drop back to the
+        // connect effect, which owns the retry/backoff loop.
+        setHasConnected(false);
+        setConnectionError('Disconnected by the server. Reconnecting...');
+        return;
+      }
+
+      // Everything else is inside socket.io's own retry loop; just say so.
+      setConnectionError('Connection lost. Reconnecting...');
+    };
+
     const handleConnect = async () => {
+      setConnectionError(null);
       const { chats: currentChats, activeChatId, fetchChats: refetchChats, fetchMessages: refetchMessages } =
         resyncRef.current;
 
@@ -747,7 +768,11 @@ const handleMessageDeliveryUpdate = useCallback(
     };
 
     sock.on('connect', handleConnect);
-    return () => sock.off('connect', handleConnect);
+    sock.on('disconnect', handleDisconnect);
+    return () => {
+      sock.off('connect', handleConnect);
+      sock.off('disconnect', handleDisconnect);
+    };
   }, [hasConnected]);
 
 

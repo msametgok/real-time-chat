@@ -124,7 +124,9 @@ Scripted `socket.io-client` probes cover what the browser can't easily reach (re
 
 ## Current state
 
-**The remediation is finished.** All of Phases 0–5 have landed, plus two follow-ups: the `chatError`/`statusError` client gap (`d181602`) and a Mongo server-selection timeout (`e7b0904`). Everything is unit-tested *and* verified in the real app — the two-browser pass was run on 2026-07-20 and no verification is outstanding.
+**The remediation is finished.** All of Phases 0–5 have landed, plus two follow-ups: the `chatError`/`statusError` client gap (`d181602`) and a Mongo server-selection timeout (`e7b0904`). Everything through those two follow-ups is unit-tested *and* verified in the real app — the two-browser pass was run on 2026-07-20.
+
+Since then, the silent mid-session socket loss (known bug 1) has been fixed. It is unit-tested, and a scripted probe confirmed the three `disconnect` reason strings it branches on against a real socket.io client. The **banner itself has not been driven in a browser** — normal use looks healthy, but nobody has watched it appear and clear during an actual outage. To do that: two profiles, stop the backend, watch for the banner, restart, confirm it clears and missed messages arrive without a reload.
 
 `REMEDIATION-PLAN.md` is tracked in the repo root. Its phase-by-phase detail is now history, but two parts stay useful: the **verification recipes** (how to drive the error banner, why network throttling cannot test the `selectChat` race, the two-browser setup traps) and the record of where the plan's own instructions turned out to be **wrong**. Read it before writing a realtime test — several obvious approaches there are documented as producing confident false passes.
 
@@ -133,13 +135,13 @@ Conventions worth knowing, all introduced during the remediation:
 - `typingUsers` in `ChatContext` is keyed **`{ [chatId]: { [userId]: {username} } }`**; the handler records every chat and the view filters by `activeChat._id`, because gating in the handler also swallowed the stop event.
 - Socket handlers are registered **before** any `await` in the connection bootstrap. Moving them back down re-opens a window where a freshly-connected client's emits hit a socket with no listener and vanish.
 - Realtime errors surface through `RealtimeNotice`, not through ChatList's `chatError` state — that one renders *instead of* the sidebar.
+- **Connection state is owned by two different places, split by timing.** The connect effect handles the *initial* connect and its backoff retry; it is gated on `!hasConnected` and never sees a later failure. Everything *after* that — mid-session drops — is handled by the raw-socket `connect`/`disconnect` listeners in effect 6.6, which live for the whole session. Branch on the disconnect reason: `io client disconnect` is our own teardown and must stay silent, `io server disconnect` does **not** auto-reconnect and has to flip `hasConnected` false to hand control back to the connect effect, and everything else is already inside socket.io's retry loop.
 
 ### Known bugs, not yet fixed
 
-Both were found during verification and deliberately left; neither is a regression.
+Found during verification and deliberately left; not a regression.
 
-1. **Mid-session socket loss is silent.** The connect effect in `ChatContext` is gated on `!hasConnected`, so a socket that dies *after* connecting sets no `connectionError`. Socket.IO reconnects underneath, but during an outage the UI gives no indication at all. `connectionError` currently only covers the *initial* connect.
-2. **The join repair has no retry cap.** `handleChatError` drops the chat id from `joinedChatsRef` so a rejected `joinChat` is re-attempted — correct for a transient failure, but the retry rides on `chats` changing, and `chats` changes on every incoming message. A permanently-denied chat that stayed in the list would produce a steady trickle of doomed joins. Bounded in practice only because the refetch drops the chat. A per-chat backoff or attempt cap would close it.
+1. **The join repair has no retry cap.** `handleChatError` drops the chat id from `joinedChatsRef` so a rejected `joinChat` is re-attempted — correct for a transient failure, but the retry rides on `chats` changing, and `chats` changes on every incoming message. A permanently-denied chat that stayed in the list would produce a steady trickle of doomed joins. Bounded in practice only because the refetch drops the chat. A per-chat backoff or attempt cap would close it.
 
 Known-incomplete features: file/image upload (`multer` is installed, no route), group chat admin actions, and message edit/delete.
 
