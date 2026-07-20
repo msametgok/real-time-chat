@@ -52,10 +52,11 @@ describe('statusEvents module shape', () => {
     // Regression guard: a nested `module.exports` inside the first one meant
     // this module silently registered only ONE of its two handlers. The file
     // parsed fine and threw nothing - the bug was invisible at runtime.
-    it('registers BOTH markMessagesAsRead and messageDeliveredToClient', () => {
+    it('registers every handler, not just the first', () => {
         const { handlers } = buildHarness();
 
         expect(Object.keys(handlers).sort()).toEqual([
+            'markChatAsRead',
             'markMessagesAsRead',
             'messageDeliveredToClient'
         ]);
@@ -268,5 +269,114 @@ describe('markMessagesAsRead', () => {
         expect(h.roomEmits.filter(e => e.event === 'messagesReadUpdate')).toHaveLength(0);
         const ack = h.socketEmits.find(e => e.event === 'markMessagesAsReadAck');
         expect(ack.payload.updatedCount).toBe(0);
+    });
+});
+
+describe('markChatAsRead', () => {
+    const chatId = 'chat-1';
+
+    // The bug this handler exists for: markMessagesAsRead only covers the ids
+    // the client passes, which is the single page it has loaded. Messages
+    // older than that page stayed unread forever, so a long chat showed a
+    // sidebar badge that opening it could not clear.
+    it('marks messages the client never loaded, not just a passed-in page', async () => {
+        const h = buildHarness();
+        h.Chat.findOne.mockReturnValue(selectLean({ participants: ['user-1', 'user-2'] }));
+        h.Message.find.mockReturnValue(selectLean([
+            { _id: 'old-msg', sender: 'user-2', readBy: [] },
+            { _id: 'older-msg', sender: 'user-2', readBy: [] }
+        ]));
+        h.Message.updateMany.mockResolvedValue({ modifiedCount: 2 });
+
+        await h.handlers.markChatAsRead({ chatId });
+
+        // No message ids were supplied - the handler found them itself.
+        const [filter] = h.Message.find.mock.calls[0];
+        expect(filter.chat).toBe(chatId);
+        expect(filter.sender).toEqual({ $ne: 'user-1' });
+        expect(filter.readBy).toEqual({ $ne: 'user-1' });
+
+        const [updateFilter, update] = h.Message.updateMany.mock.calls[0];
+        expect(updateFilter._id.$in).toEqual(['old-msg', 'older-msg']);
+        expect(update).toEqual({ $addToSet: { readBy: 'user-1' } });
+    });
+
+    it('broadcasts a read receipt in the same shape as markMessagesAsRead', async () => {
+        const h = buildHarness();
+        h.Chat.findOne.mockReturnValue(selectLean({ participants: ['user-1', 'user-2'] }));
+        h.Message.find.mockReturnValue(selectLean([
+            { _id: 'msg-1', sender: 'user-2', readBy: [] }
+        ]));
+        h.Message.updateMany.mockResolvedValue({ modifiedCount: 1 });
+
+        await h.handlers.markChatAsRead({ chatId });
+
+        const broadcast = h.roomEmits.find(e => e.event === 'messagesReadUpdate');
+        expect(broadcast.room).toBe(chatId);
+        expect(broadcast.payload.messageIds).toEqual(['msg-1']);
+        expect(broadcast.payload.reader).toEqual({ userId: 'user-1', username: 'alice' });
+    });
+
+    // readBy is read BEFORE the update here, unlike markMessagesAsRead which
+    // re-reads after. Forgetting to add this reader in means nothing is ever
+    // reported as read-by-all and the sender's ticks never complete.
+    it('counts this reader when deciding read-by-all', async () => {
+        const h = buildHarness();
+        h.Chat.findOne.mockReturnValue(selectLean({ participants: ['user-1', 'user-2'] }));
+        h.Message.find.mockReturnValue(selectLean([
+            { _id: 'msg-1', sender: 'user-2', readBy: [] }
+        ]));
+        h.Message.updateMany.mockResolvedValue({ modifiedCount: 1 });
+
+        await h.handlers.markChatAsRead({ chatId });
+
+        const broadcast = h.roomEmits.find(e => e.event === 'messagesReadUpdate');
+        expect(broadcast.payload.messagesReadByAll).toEqual(['msg-1']);
+    });
+
+    it('does not write or broadcast when nothing is unread', async () => {
+        const h = buildHarness();
+        h.Chat.findOne.mockReturnValue(selectLean({ participants: ['user-1', 'user-2'] }));
+        h.Message.find.mockReturnValue(selectLean([]));
+
+        await h.handlers.markChatAsRead({ chatId });
+
+        expect(h.Message.updateMany).not.toHaveBeenCalled();
+        expect(h.roomEmits).toHaveLength(0);
+        const ack = h.socketEmits.find(e => e.event === 'markMessagesAsReadAck');
+        expect(ack.payload.updatedCount).toBe(0);
+    });
+
+    it('refuses a chat the user does not participate in', async () => {
+        const h = buildHarness();
+        h.Chat.findOne.mockReturnValue(selectLean(null));
+
+        await h.handlers.markChatAsRead({ chatId });
+
+        expect(h.Message.updateMany).not.toHaveBeenCalled();
+        expect(h.socketEmits[0].event).toBe('statusError');
+    });
+
+    it('rejects a missing chatId and survives an undefined payload', async () => {
+        const h = buildHarness();
+
+        await expect(h.handlers.markChatAsRead()).resolves.not.toThrow();
+        await h.handlers.markChatAsRead({});
+
+        expect(h.socketEmits).toHaveLength(2);
+        expect(h.socketEmits[0].event).toBe('statusError');
+        expect(h.logger.error).not.toHaveBeenCalled(); // handled, not crashed
+    });
+
+    // Gotcha 1: a catch that reads a const declared inside the try throws
+    // ReferenceError and masks the real error.
+    it('logs a DB failure with the chatId still in scope', async () => {
+        const h = buildHarness();
+        h.Chat.findOne.mockImplementation(() => { throw new Error('mongo is down'); });
+
+        await expect(h.handlers.markChatAsRead({ chatId })).resolves.toBeUndefined();
+
+        expect(h.logger.error).toHaveBeenCalled();
+        expect(h.logger.error.mock.calls[0][0]).toContain(chatId);
     });
 });

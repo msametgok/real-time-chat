@@ -16,6 +16,7 @@ vi.mock('../../services/socket', () => ({
         typingStart: vi.fn(),
         typingStop: vi.fn(),
         markMessagesAsRead: vi.fn(),
+        markChatAsRead: vi.fn(),
         messageDeliveredToClient: vi.fn(),
         onNewMessage: vi.fn(cb => { newMessageHandler = cb; }),
         offNewMessage: vi.fn(),
@@ -158,6 +159,28 @@ describe('unread badge counting', () => {
         await act(async () => { await result.current.selectChat(OTHER_ID); });
 
         expect(unreadFor(result, OTHER_ID)).toBe(0);
+    });
+
+    // Clearing it locally is not enough. The count now comes from the server on
+    // every fetchChats, and ChatWindow only marks the page it has loaded - so
+    // without this emit a chat with unread history older than one page would
+    // show its badge again on the next reload.
+    it('tells the server to clear the whole chat, not just the loaded page', async () => {
+        const { result } = await renderChats();
+
+        await act(async () => { await result.current.selectChat(OTHER_ID); });
+
+        expect(socketService.markChatAsRead).toHaveBeenCalledWith(OTHER_ID);
+    });
+
+    it('does not re-emit when the chat is already active', async () => {
+        const { result } = await renderChats();
+
+        await act(async () => { await result.current.selectChat(OTHER_ID); });
+        socketService.markChatAsRead.mockClear();
+        await act(async () => { await result.current.selectChat(OTHER_ID); });
+
+        expect(socketService.markChatAsRead).not.toHaveBeenCalled();
     });
 
     it('still updates the preview and ordering for the muted own-message case', async () => {

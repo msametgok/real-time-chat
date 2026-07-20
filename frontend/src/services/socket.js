@@ -142,6 +142,8 @@ class SocketService {
   typingStart(chatId) { this.emit('typingStart', { chatId }); }
   typingStop(chatId) { this.emit('typingStop', { chatId }); }
   markMessagesAsRead(chatId, messageIds) { this.emit('markMessagesAsRead', { chatId, messageIds }); }
+  // Clears the whole chat, including messages older than the loaded page.
+  markChatAsRead(chatId) { this.emit('markChatAsRead', { chatId }); }
   messageDeliveredToClient(messageId, chatId) { this.emit('messageDeliveredToClient', { messageId, chatId }); }
 
   // ——— Listener registration ———

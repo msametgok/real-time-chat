@@ -243,6 +243,11 @@ export function ChatProvider({ children }) {
         setChats(prev =>
           prev.map(c => (c._id === chatId ? { ...c, unreadCount: 0 } : c))
         );
+        // Clear the badge on the SERVER too, for the whole chat. ChatWindow
+        // marks only the page it has loaded, so without this the next
+        // fetchChats would recompute a count from messages the user never
+        // scrolled back to and the badge would reappear on reload.
+        socketService.markChatAsRead(chatId);
         await fetchMessages(chatId);
       }
     },

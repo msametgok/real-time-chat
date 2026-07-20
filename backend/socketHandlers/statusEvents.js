@@ -83,6 +83,87 @@ module.exports = ({ io, socket, logger, redis, Message, Chat }) => {
     });
 
     /**
+     * Marks EVERY unread message in a chat as read for this user.
+     * Client sends: { chatId: '...' } when the chat is opened.
+     *
+     * markMessagesAsRead above only ever covers the ids the client passes,
+     * which is the one page (30) it currently holds. Anything older that the
+     * user never scrolled to stayed unread in Mongo forever - invisible until
+     * the sidebar badge started reading its count from the server, at which
+     * point a long chat showed a badge that opening it could not clear.
+     *
+     * Consequence worth knowing: senders receive read receipts for messages
+     * the reader never actually looked at. That is the deliberate trade for
+     * "opening a chat clears its badge".
+     */
+    socket.on('markChatAsRead', async (data) => {
+        // Hoisted so the catch block can read it - see chatEvents.js
+        let chatId;
+        const readerId = socket.user.userId;
+        const readerName = socket.user.username;
+
+        try {
+            ({ chatId } = data || {});
+
+            if (!chatId) {
+                logger.warn(`${readerName} 'markChatAsRead' with no chatId.`);
+                return socket.emit('statusError', { message: 'Chat ID is required.' });
+            }
+
+            const chat = await findChatForParticipant(Chat, chatId, readerId);
+            if (!chat) {
+                logger.warn(`${readerName} 'markChatAsRead' for unauthorized/non-existent chat ${chatId}.`);
+                return socket.emit('statusError', { chatId, message: 'Access denied or chat not found.' });
+            }
+
+            // Collect the ids FIRST: updateMany reports how many it changed but
+            // not which, and the read-receipt broadcast needs the actual ids.
+            const unread = await Message.find({
+                chat: chatId,
+                sender: { $ne: readerId },
+                readBy: { $ne: readerId }
+            }).select('_id sender readBy').lean();
+
+            if (unread.length === 0) {
+                return socket.emit('markMessagesAsReadAck', { chatId, updatedCount: 0 });
+            }
+
+            const messageIds = unread.map(m => m._id.toString());
+
+            await Message.updateMany(
+                { _id: { $in: messageIds } },
+                { $addToSet: { readBy: readerId } }
+            );
+
+            // computeReadByAll reads the pre-update readBy, so add this reader
+            // in before asking - otherwise nothing is ever "read by all".
+            const readByAll = unread
+                .filter(msg => computeReadByAll(
+                    { ...msg, readBy: [...(msg.readBy || []), readerId] },
+                    chat.participants
+                ))
+                .map(msg => msg._id.toString());
+
+            logger.info(`${readerName} marked all ${messageIds.length} unread messages as read in chat ${chatId}.`);
+
+            // Same payload shape as markMessagesAsRead, so the client needs no
+            // new listener for the tick updates.
+            io.to(chatId).emit('messagesReadUpdate', {
+                chatId,
+                reader: { userId: readerId, username: readerName },
+                messageIds,
+                messagesReadByAll: readByAll
+            });
+
+            socket.emit('markMessagesAsReadAck', { chatId, updatedCount: messageIds.length });
+
+        } catch (error) {
+            logger.error(`Error during 'markChatAsRead' for ${readerName}, chat ${chatId}: ${error.message}`, error);
+            socket.emit('statusError', { chatId, message: 'Failed to mark chat as read.' });
+        }
+    });
+
+    /**
      * Handles an event when a message has been delivered to a specific client's device/app.
      * Client should send: { messageId: '...', chatId: '...' }
      */

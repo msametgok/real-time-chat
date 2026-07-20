@@ -23,6 +23,7 @@ vi.mock('../../services/socket', () => ({
         typingStart: vi.fn(),
         typingStop: vi.fn(),
         markMessagesAsRead: vi.fn(),
+        markChatAsRead: vi.fn(),
         messageDeliveredToClient: vi.fn(),
         onNewMessage: vi.fn(), offNewMessage: vi.fn(),
         onNewChat: vi.fn(), offNewChat: vi.fn(),
