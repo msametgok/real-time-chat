@@ -1,13 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../hooks/useAuth';
 import { useChat } from '../../hooks/useChat';
 import ErrorMessage from '../common/ErrorMessage';
 import LoadingSpinner from '../common/LoadingSpinner';
+import NewChatModal from './NewChatModal';
 
 function ChatListItem({ chat, currentUserId, isActive, onSelectChat }) {
   const { displayChatName, chatAvatar, latestMessage } = chat;
 
-  // Client-side only: counts start from zero on refresh, which is accepted.
+  // The count is server-supplied on fetch and client-incremented in between,
+  // so it survives a refresh. The active chat always reads 0: you are looking
+  // at it, and markChatAsRead has already gone out.
   const unreadCount = isActive ? 0 : (chat.unreadCount || 0);
 
   let lastMessageText = 'No messages yet';
@@ -98,25 +101,52 @@ function ChatList() {
     selectChat,
     isLoadingChats,
     chatError,
-    //createOneOnOneChat, //For creating new chats - UI can be added later
-    //createGroupChat
   } = useChat();
+
+  const [isNewChatOpen, setIsNewChatOpen] = useState(false);
+
+  // The button renders even while chats are loading or errored: with no chats
+  // and no way to make one, the app was a dead end until you seeded Mongo by
+  // hand. It must never be the thing that disappears.
+  const newChatButton = (
+    <button
+      onClick={() => setIsNewChatOpen(true)}
+      className="w-full mt-4 rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium
+                 text-white hover:bg-indigo-500 focus:outline-none"
+    >
+      + New chat
+    </button>
+  );
+
+  const modal = (
+    <NewChatModal isOpen={isNewChatOpen} onClose={() => setIsNewChatOpen(false)} />
+  );
 
   if (isLoadingChats && (!chats || chats.length === 0)) {
     return (
-      <div className="flex-grow flex items-center justify-center">
+      <div className="flex-grow flex flex-col items-center justify-center">
         <LoadingSpinner />
+        {newChatButton}
+        {modal}
       </div>
     );
   }
 
   if (chatError) {
-    return <ErrorMessage message={chatError} />;
+    return (
+      <div className="flex flex-col">
+        <ErrorMessage message={chatError} />
+        {newChatButton}
+        {modal}
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-col mt-8 flex-grow overflow-y-auto pr-2 -mr-2 custom-scrollbar">
-      <div className="flex flex-col space-y-1 ">
+      {newChatButton}
+      {modal}
+      <div className="flex flex-col space-y-1 mt-4">
         {chats.length === 0 && !isLoadingChats && (
           <p className="text-slate-400 italic text-center p-4">No chats yet. Start a new conversation!</p>
         )}
