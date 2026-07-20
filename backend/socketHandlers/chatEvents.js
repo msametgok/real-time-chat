@@ -89,12 +89,26 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decryptMe
                 return socket.emit('messageError', { tempId, message: 'chatId and messageType are required.' });
             }
 
-            // Verify user is part of the chat
-            const chat = await findChatForParticipant(Chat, chatId, userId);
+            // Verify user is part of the chat.
+            //
+            // deletedFor is selected because the Message post-save hook CLEARS
+            // it - a new message un-hides the chat for everyone who had soft
+            // deleted it. Whoever that was has to be told, so read it before
+            // saving or the information is gone.
+            const chat = await findChatForParticipant(
+                Chat, chatId, userId, 'participants deletedFor'
+            );
             if (!chat) {
                 logger.warn(`Unauthorized sendMessage by ${username} to ${chatId}`);
                 return socket.emit('messageError', { chatId, tempId, message: 'Access denied.' });
             }
+
+            // Captured before the save clears it. The sender cannot be in here
+            // - they could not have sent to a chat they cannot see - but filter
+            // anyway rather than rely on that.
+            const restoredFor = (chat.deletedFor || [])
+                .map(id => id.toString())
+                .filter(id => id !== userId.toString());
 
             let msg = {
                 chat: chatId,
@@ -139,6 +153,19 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decryptMe
             // online regardless of which chat they are viewing. Emitting a second
             // sidebar event just made unread counts climb by 3 per message.
             socket.to(chatId).emit('newMessage', populated);
+
+            // Anyone who had soft-deleted this chat is NOT in the room - they
+            // left it on delete - so the broadcast above cannot reach them and
+            // their sidebar would stay empty until a manual reload.
+            //
+            // Sent to the personal room, which every user joins on connect and
+            // never leaves. Carries only the id: the client refetches, which
+            // gets it a per-viewer formatted chat and a server-computed unread
+            // count without duplicating either here.
+            for (const restoredUserId of restoredFor) {
+                io.to(`user-${restoredUserId}`).emit('chatRestored', { chatId });
+                logger.info(`Chat ${chatId} restored for user ${restoredUserId} by a new message.`);
+            }
 
             // 3) Emit delivery‐receipt events only for truly online users and update DB
             for (const participantId of chat.participants.map(p => p.toString())) {

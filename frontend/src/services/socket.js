@@ -27,6 +27,7 @@ class SocketService {
     this.eventCallbacks = {
       newMessage: null,
       newChat: null,
+      chatRestored: null,
       typing: null,
       messagesReadUpdate: null,
       messageDeliveryUpdate: null,
@@ -107,6 +108,7 @@ class SocketService {
     // Core event wiring:
     this.socket.on('newMessage', data => this.eventCallbacks.newMessage?.(data));
     this.socket.on('newChat', data => this.eventCallbacks.newChat?.(data));
+    this.socket.on('chatRestored', data => this.eventCallbacks.chatRestored?.(data));
     this.socket.on('typing', data => this.eventCallbacks.typing?.(data));
     this.socket.on('messagesReadUpdate', data => this.eventCallbacks.messagesReadUpdate?.(data));
     this.socket.on('messageDeliveryUpdate', data => this.eventCallbacks.messageDeliveryUpdate?.(data));
@@ -167,6 +169,10 @@ class SocketService {
 
   onNewChat(cb) { this._registerListener('newChat', cb); }
   offNewChat(cb) { this._unregisterListener('newChat', cb); }
+
+  // A chat the user had soft-deleted, brought back by a new message.
+  onChatRestored(cb) { this._registerListener('chatRestored', cb); }
+  offChatRestored(cb) { this._unregisterListener('chatRestored', cb); }
 
   onTyping(cb) { this._registerListener('typing', cb); }
   offTyping(cb) { this._unregisterListener('typing', cb); }

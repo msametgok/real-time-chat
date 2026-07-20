@@ -21,6 +21,7 @@ vi.mock('../../services/socket', () => ({
         messageDeliveredToClient: vi.fn(),
         onNewMessage: vi.fn(), offNewMessage: vi.fn(),
         onNewChat: vi.fn(cb => { newChatHandler = cb; }), offNewChat: vi.fn(),
+        onChatRestored: vi.fn(), offChatRestored: vi.fn(),
         onTyping: vi.fn(cb => { typingHandler = cb; }), offTyping: vi.fn(),
         onMessagesReadUpdate: vi.fn(), offMessagesReadUpdate: vi.fn(),
         onMessageDeliveryUpdate: vi.fn(), offMessageDeliveryUpdate: vi.fn(),

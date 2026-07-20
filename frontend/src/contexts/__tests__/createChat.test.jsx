@@ -1,6 +1,8 @@
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+let chatRestoredHandler = null;
+
 vi.mock('../../services/socket', () => ({
     default: {
         sendMessage: vi.fn(() => true),
@@ -16,6 +18,7 @@ vi.mock('../../services/socket', () => ({
         messageDeliveredToClient: vi.fn(),
         onNewMessage: vi.fn(), offNewMessage: vi.fn(),
         onNewChat: vi.fn(), offNewChat: vi.fn(),
+        onChatRestored: vi.fn(cb => { chatRestoredHandler = cb; }), offChatRestored: vi.fn(),
         onTyping: vi.fn(), offTyping: vi.fn(),
         onMessagesReadUpdate: vi.fn(), offMessagesReadUpdate: vi.fn(),
         onMessageDeliveryUpdate: vi.fn(), offMessageDeliveryUpdate: vi.fn(),
@@ -67,6 +70,7 @@ const render = async () => {
 
 beforeEach(() => {
     vi.clearAllMocks();
+    chatRestoredHandler = null;
     api.getUserChats.mockResolvedValue([]);
     api.getChatMessages.mockResolvedValue({ messages: [] });
 });
@@ -226,5 +230,51 @@ describe('removing a chat', () => {
 
         expect(result.current.chats).toHaveLength(1);
         expect(result.current.chatError).toBeNull();
+    });
+});
+
+describe('a soft-deleted chat coming back', () => {
+    const RESTORED = {
+        _id: 'chat-1',
+        isGroupChat: false,
+        displayChatName: 'bob',
+        participants: [{ _id: 'user-1' }, { _id: 'user-2' }],
+        unreadCount: 3,
+        updatedAt: '2026-07-20T10:00:00Z'
+    };
+
+    // We left the chat's room when we deleted it, so the newMessage broadcast
+    // cannot reach us. Without refetching, the chat stays missing from the
+    // sidebar until a manual page reload - which is what the user hit.
+    it('refetches so the chat reappears with its unread badge', async () => {
+        const { result } = await render();
+        expect(result.current.chats).toHaveLength(0);
+
+        api.getUserChats.mockResolvedValue([RESTORED]);
+        await act(async () => { chatRestoredHandler({ chatId: 'chat-1' }); });
+
+        await waitFor(() => expect(result.current.chats).toHaveLength(1));
+        // The badge comes from the server, so it is right immediately.
+        expect(result.current.chats[0].unreadCount).toBe(3);
+    });
+
+    it('does not refetch for a chat already in the sidebar', async () => {
+        api.getUserChats.mockResolvedValue([RESTORED]);
+        const { result } = renderHook(() => useChat(), { wrapper });
+        await waitFor(() => expect(result.current.chats).toHaveLength(1));
+        api.getUserChats.mockClear();
+
+        await act(async () => { chatRestoredHandler({ chatId: 'chat-1' }); });
+
+        expect(api.getUserChats).not.toHaveBeenCalled();
+    });
+
+    it('ignores a payload with no chatId', async () => {
+        await render();
+        api.getUserChats.mockClear();
+
+        await act(async () => { chatRestoredHandler({}); });
+
+        expect(api.getUserChats).not.toHaveBeenCalled();
     });
 });

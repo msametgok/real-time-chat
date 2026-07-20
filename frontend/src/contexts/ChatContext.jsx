@@ -446,6 +446,21 @@ export function ChatProvider({ children }) {
     });
   }, []);
 
+  // A chat this user had soft-deleted got a new message, so the server
+  // un-hid it. We are not in its room any more - leaveChat ran on delete - so
+  // the newMessage broadcast never reaches us and the sidebar would stay empty
+  // until a manual reload.
+  //
+  // Refetch rather than reconstruct from the payload: that yields a properly
+  // formatted chat and, importantly, the server-computed unread count, so the
+  // chat reappears already carrying its badge. The join effect picks the room
+  // back up once the chat is in `chats`.
+  const handleChatRestored = useCallback(({ chatId } = {}) => {
+    if (!chatId) return;
+    if (chatsRef.current.some(c => c._id === chatId)) return; // already visible
+    fetchChats();
+  }, [fetchChats]);
+
   // Typing indicators.
   //
   // Keyed by chatId, then userId. The old shape was keyed by userId alone and
@@ -621,6 +636,7 @@ const handleMessageDeliveryUpdate = useCallback(
 
     socketService.onNewMessage(handleNewMessage);
     socketService.onNewChat(handleNewChat);
+    socketService.onChatRestored(handleChatRestored);
     socketService.onTyping(handleTyping);
     socketService.onMessagesReadUpdate(handleMessagesReadUpdate);
     socketService.onMessageDeliveryUpdate(handleMessageDeliveryUpdate);
@@ -633,6 +649,7 @@ const handleMessageDeliveryUpdate = useCallback(
     return () => {
       socketService.offNewMessage(handleNewMessage);
       socketService.offNewChat(handleNewChat);
+      socketService.offChatRestored(handleChatRestored);
       socketService.offTyping(handleTyping);
       socketService.offMessagesReadUpdate(handleMessagesReadUpdate);
       socketService.offMessageDeliveryUpdate(handleMessageDeliveryUpdate);
@@ -646,6 +663,7 @@ const handleMessageDeliveryUpdate = useCallback(
     isAuthenticated,
     handleNewMessage,
     handleNewChat,
+    handleChatRestored,
     handleTyping,
     handleMessagesReadUpdate,
     handleMessageDeliveryUpdate,

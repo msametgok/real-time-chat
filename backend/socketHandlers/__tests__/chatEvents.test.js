@@ -315,3 +315,74 @@ describe('sendMessage failure paths still reach the sender', () => {
         expect(err.payload.chatId).toBe(chatId);
     });
 });
+
+describe('restoring a soft-deleted chat', () => {
+    // A user who soft-deleted a chat has LEFT its room, so the newMessage
+    // broadcast above cannot reach them. Without a nudge on their personal
+    // room their sidebar stays empty until a manual page reload.
+    it('notifies a participant who had hidden the chat', async () => {
+        const h = buildHarness();
+        h.Chat.findOne.mockReturnValue(selectLean({
+            ...participantChat,
+            deletedFor: ['user-2']
+        }));
+        h.Message.findById.mockReturnValue(populateLean({ ...populatedMessage }));
+
+        await h.handlers.sendMessage({
+            chatId, messageType: 'text', content: 'hello', tempId: 't1'
+        });
+
+        const restored = h.find('chatRestored');
+        expect(restored).toHaveLength(1);
+        expect(restored[0].room).toBe('user-user-2');
+        expect(restored[0].payload).toEqual({ chatId });
+    });
+
+    it('says nothing when nobody had hidden the chat', async () => {
+        const h = buildHarness();
+        primeSuccessfulSend(h);
+
+        await h.handlers.sendMessage({
+            chatId, messageType: 'text', content: 'hello', tempId: 't1'
+        });
+
+        expect(h.find('chatRestored')).toHaveLength(0);
+    });
+
+    // deletedFor is read from the chat BEFORE saving, because the Message
+    // post-save hook clears it - read it after and the list is always empty.
+    it('reads deletedFor from the chat lookup, not after the save', async () => {
+        const h = buildHarness();
+        h.Chat.findOne.mockReturnValue(selectLean({
+            ...participantChat,
+            deletedFor: ['user-2']
+        }));
+        h.Message.findById.mockReturnValue(populateLean({ ...populatedMessage }));
+
+        await h.handlers.sendMessage({
+            chatId, messageType: 'text', content: 'hello', tempId: 't1'
+        });
+
+        // The select must ask for deletedFor, or it is never loaded at all.
+        const selectArg = h.Chat.findOne.mock.results[0].value.select.mock.calls[0][0];
+        expect(selectArg).toContain('deletedFor');
+    });
+
+    // The sender cannot have hidden a chat they are writing to, but a stale
+    // entry must not bounce back at them.
+    it('never notifies the sender', async () => {
+        const h = buildHarness();
+        h.Chat.findOne.mockReturnValue(selectLean({
+            ...participantChat,
+            deletedFor: ['user-1', 'user-2']
+        }));
+        h.Message.findById.mockReturnValue(populateLean({ ...populatedMessage }));
+
+        await h.handlers.sendMessage({
+            chatId, messageType: 'text', content: 'hello', tempId: 't1'
+        });
+
+        const rooms = h.find('chatRestored').map(e => e.room);
+        expect(rooms).toEqual(['user-user-2']);
+    });
+});
