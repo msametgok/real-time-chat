@@ -122,17 +122,19 @@ the backend log together. Check the flow from both sides — sender and receiver
 
 Scripted `socket.io-client` probes cover what the browser can't easily reach (rejected joins, auth, races). Two traps, both of which have produced fake failures here: **write the probe outside `backend/`** — nodemon watches that tree and restarts the server underneath a running probe — and **remove the listener when a `waitFor` times out**, or the stale `once` swallows the next assertion's event. Socket auth signs `{ userId }`, not `{ id }`.
 
-**Ask before committing.** Don't run `git commit` unprompted, even when the work is finished and tested — summarize what would be staged and wait. Commit one logical change at a time so regressions bisect cleanly.
+**Ask before committing. Never push.** Don't run `git commit` unprompted, even when the work is finished and tested — summarize what would be staged and wait. Commit one logical change at a time so regressions bisect cleanly. `git push` is the user's own step: don't run it even when asked to commit, and don't treat approval of a commit as approval to publish. Say the branch is ready and stop.
 
 ## Current state
 
-**The remediation is finished.** All of Phases 0–5 have landed, plus two follow-ups: the `chatError`/`statusError` client gap (`d181602`) and a Mongo server-selection timeout (`e7b0904`). Everything through those two follow-ups is unit-tested *and* verified in the real app — the two-browser pass was run on 2026-07-20.
+**Bug-fixing is done; the project is moving to feature work.** The remediation (Phases 0–5) landed earlier, and a follow-up pass on 2026-07-20 closed the realtime gaps it left behind: the silent mid-session socket loss, server-side unread counts, whole-chat read clearing, the dropped-emit badge repair, a heartbeat that detects a silent connection loss in ~15s instead of ~45s, and a dead-code sweep. All of it is unit-tested; the unread work was additionally verified against the real database, and the disconnect reason strings against a real socket.io client.
 
-Since then, the silent mid-session socket loss (known bug 1) has been fixed. It is unit-tested, and a scripted probe confirmed the three `disconnect` reason strings it branches on against a real socket.io client. The **banner itself has not been driven in a browser** — normal use looks healthy, but nobody has watched it appear and clear during an actual outage. To do that: two profiles, stop the backend, watch for the banner, restart, confirm it clears and missed messages arrive without a reload.
+**The backend is well ahead of the frontend, and that is the biggest opportunity.** Six finished, routed, validated endpoints have no client method in `services/api.js` at all — `GET /api/users` (search), `GET|PUT /api/users/profile`, `GET /api/users/:userId/profile`, `GET /api/chats/:chatId`, `DELETE /api/chats/:chatId` (delete-or-leave). Two more (`createOneOnOneChat`, `createGroupChat`) have client methods and context actions but **no UI** — `ChatList.jsx:101` still carries the commented-out `//For creating new chats - UI can be added later`. That is why creating a chat currently requires the untracked dev scripts. Check this list before building anything: the server side may already be done.
+
+The `Message` schema is likewise **already prepared for attachments** — `messageType` accepts `image|video|audio|file`, and `fileUrl`/`fileName`/`fileType`/`fileSize`/`metadata` all exist. `multer` is installed. Only an upload route and the UI are missing.
 
 `REMEDIATION-PLAN.md` is tracked in the repo root. Its phase-by-phase detail is now history, but two parts stay useful: the **verification recipes** (how to drive the error banner, why network throttling cannot test the `selectChat` race, the two-browser setup traps) and the record of where the plan's own instructions turned out to be **wrong**. Read it before writing a realtime test — several obvious approaches there are documented as producing confident false passes.
 
-Conventions worth knowing, all introduced during the remediation:
+Conventions worth knowing, introduced during the remediation and the 2026-07-20 pass:
 - `config/socket.js` exports `{ initializeSocket, getIO }` — use `getIO()` (null-tolerant) to broadcast from HTTP controllers.
 - `typingUsers` in `ChatContext` is keyed **`{ [chatId]: { [userId]: {username} } }`**; the handler records every chat and the view filters by `activeChat._id`, because gating in the handler also swallowed the stop event.
 - Socket handlers are registered **before** any `await` in the connection bootstrap. Moving them back down re-opens a window where a freshly-connected client's emits hit a socket with no listener and vanish.
@@ -147,6 +149,17 @@ Found during verification and deliberately left; not a regression.
 
 1. **The join repair has no retry cap.** `handleChatError` drops the chat id from `joinedChatsRef` so a rejected `joinChat` is re-attempted — correct for a transient failure, but the retry rides on `chats` changing, and `chats` changes on every incoming message. A permanently-denied chat that stayed in the list would produce a steady trickle of doomed joins. Bounded in practice only because the refetch drops the chat. A per-chat backoff or attempt cap would close it.
 
-Known-incomplete features: file/image upload (`multer` is installed, no route), group chat admin actions, and message edit/delete.
+Known-incomplete features, roughly in order of how much is already done for you:
+
+| Feature | Backend | Frontend |
+|---|---|---|
+| Start a chat / search users | done (`POST /one-on-one`, `/group`, `GET /api/users`) | no UI; context actions exist unused |
+| Delete or leave a chat | done (`DELETE /:chatId`) | no `api.js` method |
+| View / edit own profile | done (`GET|PUT /users/profile`) | no `api.js` method |
+| File & image upload | schema + `multer` ready, **no route** | none |
+| Group admin actions | commented stubs, `chatController.js:417` | none |
+| Message edit / delete | none | none |
+
+Two socket-layer notes for whoever builds these. A new handler file must be added to the `deps` wiring list in `config/socket.js` or it registers nothing. And `services/socket.js` dispatches through a **single callback slot per event** (`_registerListener` overwrites), so a second consumer of an existing event silently replaces the first — add a new event name rather than sharing one.
 
 `backend/scripts/createChat.js` and `createChatViaApi.js` are intentionally **untracked** dev helpers — `createChat.js` writes straight to Mongo (no `newChat` emit); `createChatViaApi.js` goes through the controller. Don't `git add -A` them in.
