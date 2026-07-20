@@ -25,6 +25,14 @@ const { syncUserSockets } = require('../utils/presence');
 let ioInstance = null;
 const getIO = () => ioInstance;
 
+/**
+ * Per-chat cap on the tick-state replay performed at connect. The syncs below
+ * used to be unbounded, so connect cost scaled with total message history -
+ * and every millisecond of it ran before the socket's event handlers were
+ * registered.
+ */
+const SYNC_MESSAGE_LIMIT = 50;
+
 const initializeSocket = async (server) => {
   const io = socketIo(server, {
     cors: { origin: process.env.CLIENT_URL, methods: ['GET','POST'], credentials: true }
@@ -62,16 +70,46 @@ const initializeSocket = async (server) => {
     try {
       const { userId, username } = socket.user;
 
-      // 1) Join personal room and prune stale sockets
-      socket.join(`user-${userId}`);
+      // 1) Register event handlers FIRST, before anything that awaits.
+      //
+      // They used to be registered last, after presence sync and an unbounded
+      // delivery replay. Until that finished the socket had no listeners at
+      // all, so anything the client emitted hit the floor - no error, no log,
+      // no hint to the client. Measured at ~210ms on a near-empty account, and
+      // it grew with message history because the replay ran inside the window.
+      // The client emits straight into it: joinChat from the reconnect effect
+      // fires inside its own 'connect' callback.
+      //
+      // Moving registration merely *earlier* was not enough - with a single
+      // await still ahead of it the window shrank to ~17ms but an emit sent
+      // from the client's connect callback was still dropped, every time.
+      // Nothing may be awaited above this block: everything before the first
+      // await runs in the same tick as the connection event, so a client emit
+      // (which is at least one network hop away) can never outrun it.
+      socket.join(`user-${userId}`); // synchronous
+      const deps = { io, socket, logger, redis, User, Chat, Message, encrypt, decryptMessageDoc, invalidateChatCache };
+      initializeChatEventHandlers(deps);
+      initializeTypingEventHandlers(deps);
+      initializeStatusEventHandlers(deps);
+      initializeDisconnectHandlers(deps);
+
+      socket.on('error', (err) => logger.error(`Socket Error [${userId}]: ${err.message}`, err));
+
+      // 2) Prune stale sockets for presence
       const openCount = await syncUserSockets(io, redis, userId);
       logger.debug(`Presence pruning: user ${userId} has ${openCount} live sockets`);
 
-      // 2) Auto-join all chat rooms
+      // 3) Auto-join all chat rooms.
+      //    Note this now lands a few ms AFTER handler registration. The only
+      //    handler that depends on room membership is typingEvents, which
+      //    authorizes with socket.rooms.has(chatId) - so a typing event in that
+      //    window would be ignored. It needs a keystroke to occur within a few
+      //    ms of connecting, and the cost is one skipped indicator that the
+      //    next keystroke repairs. Worth it to close the window above.
       const rooms = await Chat.find({ participants: userId }).select('_id participants').lean();
       rooms.forEach(({ _id }) => socket.join(_id.toString()));
 
-      // 3) Initial presence sync for each other participant
+      // 4) Initial presence sync for each other participant
       for (const { participants } of rooms) {
         if (Array.isArray(participants)) {
           for (const p of participants) {
@@ -92,7 +130,7 @@ const initializeSocket = async (server) => {
         }
       }
 
-      // 4) If first socket, broadcast own online status & sync deliveries
+      // 5) If first socket, broadcast own online status & sync deliveries
       if (openCount === 1) {
         for (const { _id: chatId, participants } of rooms) {
           io.to(chatId.toString()).emit('userStatusUpdate', {
@@ -108,13 +146,18 @@ const initializeSocket = async (server) => {
             username
           });
         }
-        // Sync undelivered messages
+        // Sync undelivered messages. Bounded: this used to walk every
+        // undelivered message ever, so a user returning after a long absence
+        // paid for the whole backlog before their socket became usable.
         for (const { _id: chatId, participants } of rooms) {
           const undelivered = await Message.find({
             chat:        chatId,
             sender:      { $ne: userId },
             deliveredTo: { $ne: userId }
-          }).select('_id sender deliveredTo').lean();
+          })
+            .sort({ createdAt: -1 })
+            .limit(SYNC_MESSAGE_LIMIT)
+            .select('_id sender deliveredTo').lean();
           for (const msg of undelivered) {
             const updated = await Message.findByIdAndUpdate(
               msg._id,
@@ -133,22 +176,13 @@ const initializeSocket = async (server) => {
         logger.info(`User ${username} is now online in ${rooms.length} chats`);
       }
 
-      // 5. Sync missed delivery ticks for reconnecting user
-      await syncMissedDeliveryEvents(socket, userId, rooms.map(r => r._id));
+      // 6. Sync missed delivery ticks for reconnecting user.
+      //    `rooms` carries participants already - passing it avoids a
+      //    Chat.findById per chat (and, before, per message).
+      await syncMissedDeliveryEvents(socket, userId, rooms);
 
-      // 6. NEW: Sync missed read‐receipt events for reconnecting user
-      await syncMissedReadReceipts(socket, userId, rooms.map(r => r._id));
-
-      // 7) Register event handlers
-      // No raw `decrypt` here: handlers take decryptMessageDoc, which owns the
-      // failure fallback. Passing both invited a call site to bypass it.
-      const deps = { io, socket, logger, redis, User, Chat, Message, encrypt, decryptMessageDoc, invalidateChatCache };
-      initializeChatEventHandlers(deps);
-      initializeTypingEventHandlers(deps);
-      initializeStatusEventHandlers(deps);
-      initializeDisconnectHandlers(deps);
-
-      socket.on('error', (err) => logger.error(`Socket Error [${userId}]: ${err.message}`, err));
+      // 7. Sync missed read-receipt events for reconnecting user
+      await syncMissedReadReceipts(socket, userId, rooms);
     } catch (error) {
       logger.error(`Error in connection handler for socket ${socket.id}: ${error.message}`, error);
     }
@@ -159,25 +193,37 @@ const initializeSocket = async (server) => {
   return io;
 };
 
-const syncMissedDeliveryEvents = async (socket, userId, chatIds) => {
+/**
+ * Replay tick state the client may have missed while it was away.
+ *
+ * Both syncs take `rooms` ({_id, participants}) rather than bare chat ids: the
+ * caller already has the participants, and looking them up again meant a
+ * Chat.findById per chat - in the delivery sync, per *message*, since the query
+ * sat inside the inner loop.
+ *
+ * Both are bounded to the most recent SYNC_MESSAGE_LIMIT per chat. They used to
+ * replay every message ever delivered or read, unbounded, on every connect.
+ * Older messages already carry the right ticks in the payload the client
+ * fetches over HTTP, so replaying them added nothing.
+ */
+const syncMissedDeliveryEvents = async (socket, userId, rooms) => {
   try {
-    // Placeholder: In the future, track undelivered UI updates using Redis or DB flags
-    for (const chatId of chatIds) {
+    for (const { _id: chatId, participants } of rooms) {
       const messages = await Message.find({
         chat: chatId,
         deliveredTo: userId,
         sender: { $ne: userId }
-      }).select('_id deliveredTo sender').lean();
+      })
+        .sort({ createdAt: -1 })
+        .limit(SYNC_MESSAGE_LIMIT)
+        .select('_id deliveredTo sender').lean();
 
       for (const msg of messages) {
-        const chat = await Chat.findById(chatId).select('participants').lean();
-        const deliveredToAll = computeDeliveredToAll(msg, chat.participants);
-
         socket.emit('messageDeliveryUpdate', {
           chatId,
           messageId: msg._id.toString(),
           deliveredToUserId: userId,
-          deliveredToAll
+          deliveredToAll: computeDeliveredToAll(msg, participants)
         });
       }
     }
@@ -189,22 +235,21 @@ const syncMissedDeliveryEvents = async (socket, userId, chatIds) => {
 /**
  * Sync any read receipts this user may have missed while disconnected.
  */
-const syncMissedReadReceipts = async (socket, userId, chatIds) => {
+const syncMissedReadReceipts = async (socket, userId, rooms) => {
   try {
-    for (const chatId of chatIds) {
+    for (const { _id: chatId, participants } of rooms) {
       // Find messages in this chat that *this* user has marked as read in DB
       const msgs = await Message.find({
         chat: chatId,
         readBy: userId,
         sender: { $ne: userId }
-      }).select('_id readBy sender').lean();
-
-      // For each, recompute whether it's now read-by-all
-      const chat = await Chat.findById(chatId).select('participants').lean();
-      const participantIds = chat.participants.map(p => p.toString());
+      })
+        .sort({ createdAt: -1 })
+        .limit(SYNC_MESSAGE_LIMIT)
+        .select('_id readBy sender').lean();
 
       for (const msg of msgs) {
-        const readByAll = computeReadByAll(msg, participantIds);
+        const readByAll = computeReadByAll(msg, participants);
 
         socket.emit('messagesReadUpdate', {
           chatId,
