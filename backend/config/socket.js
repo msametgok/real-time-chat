@@ -34,7 +34,19 @@ const SYNC_MESSAGE_LIMIT = 50;
 
 const initializeSocket = async (server) => {
   const io = socketIo(server, {
-    cors: { origin: process.env.CLIENT_URL, methods: ['GET','POST'], credentials: true }
+    cors: { origin: process.env.CLIENT_URL, methods: ['GET','POST'], credentials: true },
+
+    // Defaults are 25s between pings and 20s to answer one, so a connection
+    // that dies WITHOUT a close frame - laptop lid, wifi drop, DevTools
+    // offline - goes unnoticed for ~45s. The client stays silent and looks
+    // healthy that whole time while nothing reaches it, which is a shorter
+    // version of the bug the disconnect banner exists to fix. 10s/5s brings
+    // detection to ~15s for a little more heartbeat traffic.
+    //
+    // A dropped server or a clean logout still sends a close frame and is
+    // detected immediately; these numbers only govern the silent case.
+    pingInterval: 10000,
+    pingTimeout: 5000
   });
 
   // Duplicate existing Redis client pub/sub
