@@ -49,10 +49,14 @@ const buildHarness = ({ userId = 'user-1', username = 'alice' } = {}) => {
 
     const encrypt = jest.fn(v => `enc(${v})`);
     const decrypt = jest.fn(v => v.replace(/^enc\((.*)\)$/, '$1'));
+    // Mirrors utils/encryption: returns a copy, never throws.
+    const decryptMessageDoc = jest.fn(msg =>
+        msg && msg.content ? { ...msg, content: decrypt(msg.content) } : msg
+    );
     const invalidateChatCache = jest.fn().mockResolvedValue(undefined);
 
     initializeChatEventHandlers({
-        io, socket, logger, redis, Chat, Message, encrypt, decrypt, invalidateChatCache
+        io, socket, logger, redis, Chat, Message, encrypt, decryptMessageDoc, invalidateChatCache
     });
 
     const events = () => timeline.map(t => t.event);
@@ -60,7 +64,7 @@ const buildHarness = ({ userId = 'user-1', username = 'alice' } = {}) => {
 
     return {
         handlers, timeline, events, find,
-        io, socket, logger, Chat, Message, encrypt, decrypt, invalidateChatCache
+        io, socket, logger, Chat, Message, encrypt, decrypt, decryptMessageDoc, invalidateChatCache
     };
 };
 

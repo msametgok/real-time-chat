@@ -4,7 +4,7 @@ const { createAdapter } = require('@socket.io/redis-adapter');
 const jwt = require('jsonwebtoken');
 const logger = require('./logger');
 const redis = require('./redis');
-const { encrypt, decrypt } = require('../utils/encryption');
+const { encrypt, decryptMessageDoc } = require('../utils/encryption');
 const User = require('../models/User');
 const Chat = require('../models/Chat');
 const Message = require('../models/Message');
@@ -143,7 +143,9 @@ const initializeSocket = async (server) => {
       await syncMissedReadReceipts(socket, userId, rooms.map(r => r._id));
 
       // 7) Register event handlers
-      const deps = { io, socket, logger, redis, User, Chat, Message, encrypt, decrypt, invalidateChatCache };
+      // No raw `decrypt` here: handlers take decryptMessageDoc, which owns the
+      // failure fallback. Passing both invited a call site to bypass it.
+      const deps = { io, socket, logger, redis, User, Chat, Message, encrypt, decryptMessageDoc, invalidateChatCache };
       initializeChatEventHandlers(deps);
       initializeTypingEventHandlers(deps);
       initializeStatusEventHandlers(deps);

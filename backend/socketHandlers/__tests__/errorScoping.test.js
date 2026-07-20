@@ -37,7 +37,7 @@ const buildHarness = (initializer, { failWith = new Error('boom') } = {}) => {
     initializer({
         io, socket, logger, redis, Chat, Message,
         encrypt: v => v,
-        decrypt: v => v,
+        decryptMessageDoc: msg => msg,
         invalidateChatCache: jest.fn()
     });
 
@@ -134,7 +134,7 @@ describe('sendMessage error payloads carry tempId', () => {
             // findChatForParticipant chains .select(...).lean()
             Chat: { findOne: () => ({ select: () => ({ lean: async () => null }) }) },
             Message: {},
-            encrypt: v => v, decrypt: v => v,
+            encrypt: v => v, decryptMessageDoc: msg => msg,
             invalidateChatCache: jest.fn()
         });
 

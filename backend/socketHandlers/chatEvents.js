@@ -1,8 +1,11 @@
 const { computeDeliveredToAll } = require('../utils/messageStatus');
 const { findChatForParticipant } = require('../utils/chatAuth');
 
-// Destructure dependencies passed from main socket.js
-module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, invalidateChatCache }) => {
+// Destructure dependencies passed from main socket.js.
+// decryptMessageDoc arrives through deps rather than a direct require so the
+// handler stays testable with a fake - same reason `decrypt` used to. `decrypt`
+// itself is no longer used here now that the helper owns the fallback.
+module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decryptMessageDoc, invalidateChatCache }) => {
 
     socket.on('joinChat', async (data) => {
         // Declared outside the try so the catch block can actually read them -
@@ -115,27 +118,11 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decrypt, 
 
             const newMessage = await new Message(msg).save(); // This will trigger the post-save hook in Message.js
 
-            let populated = await Message.findById(newMessage._id)
-                .populate('sender', 'username avatar').lean();
-
-            // Decrypt text content for broadcasting to clients
-            if (populated.messageType === 'text' && populated.content) {
-                try {
-                    populated.content = decrypt(populated.content);
-                } catch (e) {
-                    logger.error(`Error decrypting message ${populated._id} for broadcast: ${e.message}`);
-                    // Decide how to handle: send encrypted, or a placeholder
-                    populated.content = "[Unable to display message content]";
-                }
-            } else if (['image', 'video', 'audio', 'file'].includes(populated.messageType) && populated.content) {
-                // Decrypt caption if it exists
-                try {
-                    populated.content = decrypt(populated.content);
-                } catch (e) {
-                    logger.error(`Error decrypting caption for message ${populated._id} for broadcast: ${e.message}`);
-                    populated.content = null; // Or some placeholder for caption
-                }
-            }
+            // Decrypt for broadcast. Clients never see ciphertext.
+            const populated = decryptMessageDoc(
+                await Message.findById(newMessage._id)
+                    .populate('sender', 'username avatar').lean()
+            );
 
             // Ack the sender FIRST. The ack is the only payload carrying tempId,
             // so the sender must see it before anything else can arrive - otherwise

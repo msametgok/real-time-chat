@@ -6,7 +6,7 @@ const Message = require('../models/Message');
 const User = require('../models/User');
 const redis = require('../config/redis');
 const logger = require('../config/logger');
-const { decrypt } = require('../utils/encryption');
+const { decryptMessageDoc } = require('../utils/encryption');
 const { invalidateChatCache } = require('../utils/chatCache');
 const { getIO } = require('../config/socket');
 const { isParticipant, findChatForParticipant } = require('../utils/chatAuth');
@@ -31,12 +31,11 @@ const formatChatResponse = (chat, currentUserId) => {
         chatObject.chatAvatar = chatObject.groupAvatarUrl;
     }
 
-    if (chatObject.latestMessage && chatObject.latestMessage.content && chatObject.latestMessage.messageType === 'text') {
-        try {
-            chatObject.latestMessage.content = decrypt(chatObject.latestMessage.content);
-        } catch (e) {
-            logger.warn(`Failed to decrypt latestMessage content for chat ${chatObject._id}: ${e.message}`);
-        }
+    // Previously this caught the failure, logged it, and left the ciphertext
+    // in place - so an undecryptable message rendered as a base64 blob in the
+    // sidebar. decryptMessageDoc substitutes a placeholder instead.
+    if (chatObject.latestMessage) {
+        chatObject.latestMessage = decryptMessageDoc(chatObject.latestMessage);
     }
 
     return chatObject;
@@ -284,19 +283,8 @@ exports.getChatMessages = [
                 .limit(limit)
                 .lean();
 
-            // Decrypt text message content
-            const decryptedMessages = messages.map(msg => {
-                let content = msg.content;
-                if (msg.messageType === 'text' && msg.content) {
-                    try {
-                        content = decrypt(msg.content);
-                    } catch (e) {
-                        logger.warn(`Failed to decrypt message content for msg ${msg._id} in chat ${chatId}: ${e.message}`);
-                        content = "[Content decryption failed]"; // Fallback content
-                    }
-                }
-                return { ...msg, content };
-            });
+            // Decrypt message content
+            const decryptedMessages = messages.map(decryptMessageDoc);
 
             res.status(200).json({
                 messages: decryptedMessages,
