@@ -18,7 +18,7 @@ Goal: fix the silent breakage first, then collapse the duplication — in that o
 | 1 — Stop losing messages / swallowing errors | **DONE** | `d145197` (1a) + `fafbdd9` (1b/1c/1d) |
 | 2 — Delete `chatListUpdate`, fix reconciliation | **DONE** | `caa2896` |
 | 3 — Remaining correctness | **DONE** | `57dee7e` (typing) + `d951022` (race) + `844ced6` (newChat) + `022e7af` (multi-tab) |
-| 4 — Shared helpers | in progress — 1 of 6 | `d579a42` (null-deref fix) + `messageStatus.js` |
+| 4 — Shared helpers | **DONE** — 6 of 6 | `d579a42` `2973431` `e37863c` `49d28e3` `52cca36` `2a0cb55` `09b7ce7` |
 | 5 — Cleanup | not started | — |
 
 A test suite now exists (`fdce6b0`) — jest on the backend, vitest on the frontend.
@@ -114,9 +114,36 @@ Then guard the increment at `:292` with `!fromMe` (the variable already exists a
 
 ---
 
-## Phase 4 — Shared helpers
+## Phase 4 — Shared helpers — **DONE**
 
 Deliberately after correctness, so we extract the *fixed* shape.
+
+> **This phase was not behaviour-neutral, and the plan was wrong to imply it.**
+> Four of the six carried real user-visible fixes, each committed separately
+> from its refactor where possible:
+>
+> | Fix | Symptom before |
+> |---|---|
+> | null deref in the delivery loop (`d579a42`) | send succeeded, sidebar cache stale 300s |
+> | validation responses had no `message` | 8 endpoints showed "Request failed with status code 400" |
+> | `formatChatResponse` kept ciphertext | base64 blob as the sidebar preview |
+> | non-atomic `del`/`sadd` | online user occasionally broadcast as offline |
+>
+> Other notes for whoever picks up Phase 5:
+> - **Count the copies by shape, not by the line numbers here.** The audit said
+>   4 status copies (there were 5) and 8 validation blocks (there were 10).
+>   Phases 0–3 moved code around; grep for the pattern.
+> - **`decrypt` is no longer in the socket `deps` object.** Handlers take
+>   `decryptMessageDoc`, which owns the failure fallback. Offering both invited
+>   a call site to bypass it.
+> - **The plan's "two wrappers" idea for `chatAuth` didn't survive contact** —
+>   see that commit for why error shape stayed with the callers.
+> - **Unit tests were never sufficient here.** Three `messageStatus` sites and
+>   both `presence` sites live in the connection bootstrap, which has no unit
+>   coverage. Everything was additionally verified by scripted socket clients
+>   against the live server, diffed against pre-refactor output.
+> - **`getChatDetails` keeps its own participant query** — the filter is fused
+>   to a three-way populate chain.
 
 - ~~**`backend/utils/messageStatus.js`**~~ — **DONE.** Exports `areAllOtherInArray`,
   `computeDeliveredToAll`, `computeReadByAll`. Notes for the remaining five:
@@ -145,7 +172,7 @@ Deliberately after correctness, so we extract the *fixed* shape.
 ## Phase 5 — Cleanup
 
 - **Double cache invalidation:** `Message.js:65-77` post-save hook and `chatEvents.js:176` both invalidate the same participants. Keep the hook, drop the explicit call.
-- **Phantom `onlineStatus`/`lastSeen`:** not fields on the User model (presence is Redis-only) yet `.select()`ed at 9 sites (`chatController.js:80,100,160,161,194,296` + userController). Cosmetic but misleading — strip.
+- **Phantom `onlineStatus`/`lastSeen`:** not fields on the User model (presence is Redis-only) yet `.select()`ed at 9 sites (`chatController.js:80,100,160,161,194,296` + userController). Cosmetic but misleading — strip. *Partly done in Phase 4:* `issueAuthResponse` (`e37863c`) dropped it from the register/login response, where it had always serialised to `undefined`. The `.select()` sites remain.
 - **`createOneOnOneChat` TOCTOU** (`chatController.js:72-97`): `findOne` then `save` with no unique index → simultaneous requests create duplicate chats. Use `findOneAndUpdate(..., {upsert:true})` + unique index on sorted participants.
 - **Handlers register last, so a freshly-connected socket is deaf.** *(Found while
   verifying Phase 3 — not caused by it.)* `config/socket.js` registers every
