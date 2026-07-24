@@ -110,6 +110,27 @@ describe('MessageInput typing debounce', () => {
         expect(onTypingStop).toHaveBeenCalledTimes(1);
     });
 
+    // The input used to be a single-line <input type="text">: long text could
+    // never wrap, and Enter submitted no matter what. As a textarea, Enter
+    // still sends but Shift+Enter has to make a new line instead.
+    it('inserts a newline on Shift+Enter instead of sending', async () => {
+        const input = setup();
+
+        await user.type(input, 'ab{Shift>}{Enter}{/Shift}cd');
+
+        expect(onSendMessage).not.toHaveBeenCalled();
+        expect(input).toHaveValue('ab\ncd');
+    });
+
+    it('sends multiline content with its line breaks intact', async () => {
+        const input = setup();
+
+        await user.type(input, 'ab{Shift>}{Enter}{/Shift}cd{Enter}');
+
+        expect(onSendMessage).toHaveBeenCalledWith('ab\ncd');
+        expect(input).toHaveValue('');
+    });
+
     it('ignores an empty or whitespace-only send', async () => {
         const input = setup();
 

@@ -67,7 +67,7 @@ function MessageList() {
         id="messages-container"
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex flex-col flex-grow p-3 overflow-y-auto custom-scrollbar"
+        className="flex flex-col flex-grow p-3 overflow-y-auto overflow-x-hidden custom-scrollbar"
         >
         {/* Show a spinner at the top when loading older messages */}
         {isLoadingMessages && loadingOlder && (

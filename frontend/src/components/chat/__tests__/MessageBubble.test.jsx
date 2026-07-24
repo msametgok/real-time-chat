@@ -72,4 +72,15 @@ describe('MessageBubble', () => {
         renderBubble({ content: null });
         expect(screen.getByText('[Message content not available]')).toBeInTheDocument();
     });
+
+    // jsdom does no layout, so overflow itself is not observable here - assert
+    // the classes that fix it instead. An unbroken string used to push past the
+    // bubble's max-width and give the whole message list a horizontal scrollbar,
+    // and Shift+Enter newlines were collapsed to spaces.
+    it('wraps long content and preserves newlines', () => {
+        renderBubble({ content: 'aaaa\nbbbb' });
+        const content = screen.getByText((_, el) => el.textContent === 'aaaa\nbbbb'
+            && el.className.includes('break-words'));
+        expect(content.className).toContain('whitespace-pre-wrap');
+    });
 });

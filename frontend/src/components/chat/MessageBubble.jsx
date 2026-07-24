@@ -47,7 +47,10 @@ function MessageBubble({ message, isOwnMessage, showSenderInfo, onRetry }) {
                     </div>
                 )}
                 
-                <div>{message.content || '[Message content not available]'}</div>
+                {/* break-words keeps an unbroken string inside max-w-xs instead
+                    of blowing the bubble (and the list) out horizontally;
+                    pre-wrap preserves the newlines Shift+Enter can now insert. */}
+                <div className="whitespace-pre-wrap break-words">{message.content || '[Message content not available]'}</div>
                 
                 {/* Timestamp and Status Ticks */}
                 <div className={`text-xs pt-1 text-right flex items-center justify-end gap-1 ${isOwnMessage ? 'text-indigo-200' : 'text-slate-400'}`}>
