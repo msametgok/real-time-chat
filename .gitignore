@@ -352,3 +352,6 @@ gradle-app.setting
 ### Project-specific ###
 # Editor settings - local to each machine, not part of the project
 .vscode/
+
+# User-uploaded chat files - runtime data, never source
+backend/uploads/

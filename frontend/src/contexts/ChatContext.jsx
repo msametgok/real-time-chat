@@ -334,6 +334,101 @@ export function ChatProvider({ children }) {
     }
   }, [isAuthenticated, user?._id, user?.username, activeChat?._id]);
 
+  // Shared tail of the attachment path: upload over HTTP, then emit the
+  // normal socket sendMessage with the server-returned metadata. Used by the
+  // first attempt and by a retry whose upload never completed. The caption
+  // rides along as `content`, which the server encrypts like any text.
+  const uploadAndEmit = useCallback(async (chatId, tempId, file, caption) => {
+    let uploaded;
+    try {
+      uploaded = await api.uploadChatFile(chatId, file, user?.token);
+    } catch (err) {
+      setMessages(prev =>
+        prev.map(m => (m._id === tempId ? { ...m, sending: false, failed: true } : m))
+      );
+      setMessagesError(err.message || 'File upload failed.');
+      return;
+    }
+
+    // Stash the server metadata on the bubble before emitting: a later retry
+    // can then skip the re-upload, and the server may have corrected the
+    // messageType the client guessed for its preview.
+    setMessages(prev =>
+      prev.map(m => (m._id === tempId ? { ...m, ...uploaded } : m))
+    );
+
+    const sent = socketService.sendMessage({
+      chatId,
+      tempId,
+      ...uploaded,
+      ...(caption && { content: caption })
+    });
+    if (!sent) {
+      setMessages(prev =>
+        prev.map(m => (m._id === tempId ? { ...m, sending: false, failed: true } : m))
+      );
+      setMessagesError('You appear to be offline. Message not sent.');
+    }
+  }, [user?.token]);
+
+  // Attachment flow: optimistic bubble immediately, then HTTP upload, then the
+  // regular socket send with the returned metadata - so ack reconciliation,
+  // ticks, and retry all ride the existing message path.
+  const sendAttachment = useCallback((chatId, file, caption) => {
+    if (!isAuthenticated || !user?._id || !chatId || !file) return;
+
+    const tempId = makeUUID();
+    const trimmedCaption = caption?.trim() || '';
+
+    // Preview-only guess mirroring the server's mapping; the server's answer
+    // replaces it after upload.
+    const mime = file.type || '';
+    const guessedType =
+      mime === 'image/svg+xml' ? 'file'
+      : mime.startsWith('image/') ? 'image'
+      : mime.startsWith('video/') ? 'video'
+      : mime.startsWith('audio/') ? 'audio'
+      : 'file';
+
+    const optimistic = {
+      _id: tempId,
+      chat: chatId,
+      sender: { _id: user._id, username: user.username },
+      messageType: guessedType,
+      // The caption; shown under the file in the bubble. Empty stays absent
+      // so the bubble does not render an empty caption line.
+      ...(trimmedCaption && { content: trimmedCaption }),
+      fileName: file.name,
+      fileType: mime,
+      fileSize: file.size,
+      // Client-only fields: `file` makes a failed upload retryable, and
+      // localPreviewUrl shows the image before the server copy exists. Both
+      // survive a refetch because fetchMessages re-appends in-flight sends.
+      file,
+      localPreviewUrl: guessedType === 'image' ? URL.createObjectURL(file) : null,
+      createdAt: new Date().toISOString(),
+      deliveredTo: [],
+      readBy: [user._id],
+      sending: true,
+      failed: false
+    };
+
+    if (activeChatRef.current?._id === chatId) {
+      setMessages(prev => [...prev, optimistic]);
+    }
+
+    // Optimistic sidebar preview + reorder (ChatList shows the fileName).
+    setChats(prev =>
+      sortChats(
+        prev.map(c => (c._id === chatId
+          ? { ...c, latestMessage: optimistic, updatedAt: optimistic.createdAt }
+          : c))
+      )
+    );
+
+    uploadAndEmit(chatId, tempId, file, trimmedCaption);
+  }, [isAuthenticated, user?._id, user?.username, uploadAndEmit]);
+
   // Re-send a message that previously failed. Reuses the SAME tempId so the
   // existing bubble is reconciled by messageSentAck rather than duplicated.
   const retryMessage = useCallback((tempId) => {
@@ -351,11 +446,25 @@ export function ChatProvider({ children }) {
 
     setMessagesError(null);
 
+    // An attachment whose upload never finished has the File but no fileUrl:
+    // redo both steps, caption included. One that uploaded but whose emit
+    // dropped skips straight to the emit below.
+    if (target.file && !target.fileUrl) {
+      uploadAndEmit(target.chat, tempId, target.file, target.content);
+      return;
+    }
+
     const sent = socketService.sendMessage({
       chatId: target.chat,
       messageType: target.messageType || 'text',
       content: target.content,
-      tempId
+      tempId,
+      ...(target.fileUrl && {
+        fileUrl: target.fileUrl,
+        fileName: target.fileName,
+        fileType: target.fileType,
+        fileSize: target.fileSize
+      })
     });
 
     if (!sent) {
@@ -364,7 +473,7 @@ export function ChatProvider({ children }) {
       );
       setMessagesError('Still offline. Message not sent.');
     }
-  }, []);
+  }, [uploadAndEmit]);
 
   const typingStart = useCallback((chatId) => {
     if (!chatId) return;
@@ -595,6 +704,12 @@ const handleMessageDeliveryUpdate = useCallback(
   // Server confirms a message we sent (replace optimistic temp message)
   const handleMessageSentAck = useCallback(({ tempId, message }) => {
     if (!tempId || !message) return;
+
+    // The optimistic bubble is about to be replaced by the server copy, so
+    // its local blob preview (image attachments) can be released. Read via
+    // the ref, not inside the updater - updaters must stay side-effect free.
+    const optimistic = messagesRef.current.find(m => m._id === tempId);
+    if (optimistic?.localPreviewUrl) URL.revokeObjectURL(optimistic.localPreviewUrl);
 
     setMessages(prev => {
       const i = prev.findIndex(m => m._id === tempId);
@@ -1029,6 +1144,7 @@ const handleMessageDeliveryUpdate = useCallback(
     dismissRealtimeError,
     presence,
     sendMessage,
+    sendAttachment,
     retryMessage,
     typingStart,
     typingStop,

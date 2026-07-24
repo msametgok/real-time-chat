@@ -73,6 +73,58 @@ describe('MessageBubble', () => {
         expect(screen.getByText('[Message content not available]')).toBeInTheDocument();
     });
 
+    describe('attachments', () => {
+        it('renders an image message as an image resolved against the API base', () => {
+            renderBubble({ messageType: 'image', content: null, fileUrl: '/uploads/abc.png', fileName: 'cat.png' });
+
+            const img = screen.getByRole('img', { name: 'cat.png' });
+            expect(img).toHaveAttribute('src', 'http://localhost:5000/uploads/abc.png');
+        });
+
+        // While the upload is in flight there is no server URL yet - the local
+        // blob preview must be used so the bubble is never an empty box.
+        it('prefers the local preview while the upload is in flight', () => {
+            renderBubble({
+                messageType: 'image', content: null, fileUrl: null,
+                localPreviewUrl: 'blob:preview', fileName: 'cat.png', sending: true
+            });
+
+            expect(screen.getByRole('img', { name: 'cat.png' })).toHaveAttribute('src', 'blob:preview');
+        });
+
+        it('renders a generic file as a download card with name and size', () => {
+            renderBubble({
+                messageType: 'file', content: null,
+                fileUrl: '/uploads/abc.pdf', fileName: 'notes.pdf', fileSize: 2048
+            });
+
+            expect(screen.getByText('notes.pdf')).toBeInTheDocument();
+            expect(screen.getByText('2.0 KB')).toBeInTheDocument();
+            const link = screen.getByRole('link');
+            expect(link).toHaveAttribute('href', 'http://localhost:5000/uploads/abc.pdf');
+        });
+
+        it('renders a file card without a link while still uploading', () => {
+            renderBubble({
+                messageType: 'file', content: null,
+                fileUrl: null, file: {}, fileName: 'notes.pdf', fileSize: 10, sending: true
+            });
+
+            expect(screen.getByText('notes.pdf')).toBeInTheDocument();
+            expect(screen.queryByRole('link')).not.toBeInTheDocument();
+        });
+
+        it('shows a caption instead of the missing-content placeholder', () => {
+            renderBubble({
+                messageType: 'image', fileUrl: '/uploads/abc.png',
+                fileName: 'cat.png', content: 'look at this'
+            });
+
+            expect(screen.getByText('look at this')).toBeInTheDocument();
+            expect(screen.queryByText('[Message content not available]')).not.toBeInTheDocument();
+        });
+    });
+
     // jsdom does no layout, so overflow itself is not observable here - assert
     // the classes that fix it instead. An unbroken string used to push past the
     // bubble's max-width and give the whole message list a horizontal scrollbar,

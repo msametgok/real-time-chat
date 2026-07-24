@@ -8,6 +8,8 @@ const {
     getChatDetails,
 } = require('../controllers/chatController');
 const verifyToken = require('../config/auth');
+const { requireChatParticipant, uploadChatFile } = require('../controllers/uploadController');
+const { uploadSingleFile } = require('../utils/uploads');
 
 const router = express.Router();
 
@@ -19,6 +21,8 @@ router.get('/', getUserChats);
 router.get('/:chatId/messages', getChatMessages);
 router.get('/:chatId', getChatDetails);
 router.delete('/:chatId', deleteOrLeaveChat)
+// Participant check runs before multer so a denied upload never touches disk.
+router.post('/:chatId/upload', requireChatParticipant, uploadSingleFile, uploadChatFile);
 
 
 

@@ -45,7 +45,7 @@ export const TypingIndicator = () => {
 };
 
 function ChatWindow() {
-    const { activeChat, messages, sendMessage, typingStart, typingStop, markMessagesAsRead } = useChat();
+    const { activeChat, messages, sendMessage, sendAttachment, typingStart, typingStop, markMessagesAsRead } = useChat();
     const { user } = useAuth();
 
     useEffect(() => {
@@ -77,6 +77,11 @@ function ChatWindow() {
         }
 
         sendMessage(messageData);
+    }
+
+    const handleSendAttachment = (file, caption) => {
+        if (!activeChat) return;
+        sendAttachment(activeChat._id, file, caption);
     }
 
     const handleTypingStart = () => {
@@ -112,6 +117,7 @@ function ChatWindow() {
                 <TypingIndicator /> 
                 <MessageInput
                 onSendMessage={handleSendMessage}
+                onSendAttachment={handleSendAttachment}
                 onTypingStart={handleTypingStart}
                 onTypingStop={handleTypingStop}
                 />

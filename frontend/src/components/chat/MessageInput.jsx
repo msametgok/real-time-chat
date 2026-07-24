@@ -1,7 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
+import AttachmentPreview from './AttachmentPreview';
 
-function MessageInput({ onSendMessage, onTypingStart, onTypingStop }) {
+function MessageInput({ onSendMessage, onSendAttachment, onTypingStart, onTypingStop }) {
     const [inputValue, setInputValue] = useState('');
+    const fileInputRef = useRef(null);
+
+    // A picked file is NOT sent yet - it goes to the preview modal, where the
+    // user can add a caption or cancel the whole thing.
+    const [pendingFile, setPendingFile] = useState(null);
+
+    const handleFileSelected = (e) => {
+        const file = e.target.files?.[0];
+        if (file) setPendingFile(file);
+        // Reset so choosing the same file again still fires onChange.
+        e.target.value = '';
+    };
 
     // Must be a ref, not a plain `let`: setInputValue re-renders on every
     // keystroke, which would reset a local variable to null and make the
@@ -71,11 +84,33 @@ function MessageInput({ onSendMessage, onTypingStart, onTypingStop }) {
 
     return (
         <div className="border-t-2 border-slate-700 px-4 pt-4 sm:pb-4 pb-2">
+            {pendingFile && (
+                <AttachmentPreview
+                    file={pendingFile}
+                    onSend={(caption) => {
+                        onSendAttachment?.(pendingFile, caption);
+                        setPendingFile(null);
+                    }}
+                    onCancel={() => setPendingFile(null)}
+                />
+            )}
             <form onSubmit={handleSendMessage} className="relative flex">
-                {/* Placeholder for attachment button. Bottom-aligned (not
-                    centered) so it stays on the last line as the textarea grows. */}
+                {/* Attachment button. Bottom-aligned (not centered) so it
+                    stays on the last line as the textarea grows. */}
                 <span className="absolute inset-y-0 flex items-end pb-1 left-0 pl-2">
-                <button type="button" className="inline-flex items-center justify-center rounded-full h-10 w-10 transition duration-500 ease-in-out text-slate-400 hover:bg-slate-700">
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    aria-label="Attach a file"
+                    onChange={handleFileSelected}
+                />
+                <button
+                    type="button"
+                    aria-label="Attach a file"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center justify-center rounded-full h-10 w-10 transition duration-500 ease-in-out text-slate-400 hover:bg-slate-700"
+                >
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="h-6 w-6">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                     </svg>

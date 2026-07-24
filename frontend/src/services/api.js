@@ -162,6 +162,48 @@ const api = {
         return this.request('/api/users/profile', 'PUT', updates, token);
     },
 
+    /**
+     * Upload a file into a chat. Returns the stored file's metadata -
+     * { fileUrl, fileName, fileType, fileSize, messageType } - which the
+     * caller then sends as a socket message. messageType is decided by the
+     * server from the real mimetype; do not override it.
+     */
+    async uploadChatFile(chatId, file, token) {
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            // Bypasses request(): the instance default of application/json
+            // must be replaced so axios generates the multipart boundary.
+            const response = await axiosInstance.post(
+                `/api/chat/${chatId}/upload`,
+                formData,
+                {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        'Content-Type': 'multipart/form-data'
+                    }
+                }
+            );
+            return response.data;
+        } catch (error) {
+            const errorMessage = error.response?.data?.message || error.message || 'File upload failed.';
+            console.error(`API error at POST ${API_URL}/api/chat/${chatId}/upload:`, errorMessage);
+            const errToThrow = new Error(errorMessage);
+            errToThrow.response = error.response;
+            throw errToThrow;
+        }
+    },
+
+    /**
+     * Message fileUrls are stored relative (/uploads/...) so the backend can
+     * move without stranding them; resolve against the API base for display.
+     * Absolute URLs (old data, external files) pass through untouched.
+     */
+    resolveFileUrl(fileUrl) {
+        if (!fileUrl || /^https?:\/\//.test(fileUrl)) return fileUrl;
+        return `${API_URL}${fileUrl}`;
+    },
+
     async searchUsers(keyword, token, { limit = 10, page = 1 } = {}) {
         const params = new URLSearchParams({ limit: String(limit), page: String(page) });
         // Only send `keyword` when there is one: the server treats a missing

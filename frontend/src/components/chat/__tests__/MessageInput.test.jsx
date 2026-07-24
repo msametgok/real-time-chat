@@ -139,6 +139,56 @@ describe('MessageInput typing debounce', () => {
         expect(onSendMessage).not.toHaveBeenCalled();
     });
 
+    // Picking a file must NOT send it - it opens the preview modal, where the
+    // user can caption it or back out entirely.
+    describe('attachment preview', () => {
+        const setupWithAttachment = async () => {
+            const onSendAttachment = vi.fn();
+            render(
+                <MessageInput
+                    onSendMessage={onSendMessage}
+                    onSendAttachment={onSendAttachment}
+                    onTypingStart={onTypingStart}
+                    onTypingStop={onTypingStop}
+                />
+            );
+
+            const file = new File(['data'], 'notes.pdf', { type: 'application/pdf' });
+            const input = screen.getByLabelText('Attach a file', { selector: 'input' });
+            await user.upload(input, file);
+            return { onSendAttachment, file, input };
+        };
+
+        it('opens a preview instead of sending immediately', async () => {
+            const { onSendAttachment, input } = await setupWithAttachment();
+
+            expect(onSendAttachment).not.toHaveBeenCalled();
+            expect(screen.getByRole('dialog', { name: 'Send attachment' })).toBeInTheDocument();
+            expect(screen.getByText('notes.pdf')).toBeInTheDocument();
+            // Reset so picking the same file again still fires onChange.
+            expect(input.value).toBe('');
+        });
+
+        it('sends the file with its caption and closes the preview', async () => {
+            const { onSendAttachment, file } = await setupWithAttachment();
+
+            await user.type(screen.getByLabelText('Caption'), 'here you go');
+            await user.click(screen.getByRole('button', { name: 'Send' }));
+
+            expect(onSendAttachment).toHaveBeenCalledWith(file, 'here you go');
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        });
+
+        it('cancelling the preview sends nothing', async () => {
+            const { onSendAttachment } = await setupWithAttachment();
+
+            await user.click(screen.getByRole('button', { name: 'Close' }));
+
+            expect(onSendAttachment).not.toHaveBeenCalled();
+            expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+        });
+    });
+
     it('does not fire onTypingStop after unmount', async () => {
         const { unmount } = render(
             <MessageInput

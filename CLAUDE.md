@@ -133,9 +133,9 @@ Scripted `socket.io-client` probes cover what the browser can't easily reach (re
 
 `GET /api/users/:userId/profile` and `GET /api/chat/:chatId` (details) still have no client method — neither is needed yet, but check before building. Note the HTTP mount is `/api/chat`, **singular**, while user routes are `/api/users`.
 
-Profile avatars are **URLs**, not uploads; `updateCurrentUserProfile` validates them with `isURL`. Actual file upload is the next phase. Check this list before building anything: the server side may already be done.
+Profile avatars are **URLs**, not uploads; `updateCurrentUserProfile` validates them with `isURL`. Check this list before building anything: the server side may already be done.
 
-The `Message` schema is likewise **already prepared for attachments** — `messageType` accepts `image|video|audio|file`, and `fileUrl`/`fileName`/`fileType`/`fileSize`/`metadata` all exist. `multer` is installed. Only an upload route and the UI are missing.
+File & image upload landed on 2026-07-24 (see the notes under the feature table). Avatars could now reuse the same storage, but currently still expect a URL.
 
 `REMEDIATION-PLAN.md` is tracked in the repo root. Its phase-by-phase detail is now history, but two parts stay useful: the **verification recipes** (how to drive the error banner, why network throttling cannot test the `selectChat` race, the two-browser setup traps) and the record of where the plan's own instructions turned out to be **wrong**. Read it before writing a realtime test — several obvious approaches there are documented as producing confident false passes.
 
@@ -162,9 +162,16 @@ Known-incomplete features, roughly in order of how much is already done for you:
 | ~~Start a chat / search users~~ | done | **done** — `NewChatModal` |
 | ~~Delete or leave a chat~~ | done, now a **soft delete** | **done** — menu in `ChatWindowHeader` |
 | ~~View / edit own profile~~ | done | **done** — `ProfileModal` |
-| File & image upload | schema + `multer` ready, **no route** | none |
+| ~~File & image upload~~ | **done** — `POST /api/chat/:chatId/upload` | **done** — attach button, `sendAttachment`, bubble rendering |
 | Group admin actions | commented stubs, `chatController.js:417` | none |
 | Message edit / delete | none | none |
+
+File upload notes (added 2026-07-24), for whoever touches attachments next:
+- **The upload is HTTP, the message is still the socket.** Picking a file opens `AttachmentPreview` (WhatsApp-style: shows the file, takes an optional caption, cancellable — nothing is uploaded until Send). `sendAttachment(chatId, file, caption)` then posts the file (`uploadController.js`, multer config in `utils/uploads.js`, 10 MB cap) and emits the regular `sendMessage` event with the returned metadata — the `chatEvents` handler had accepted attachment fields all along. Acks, ticks, and retry ride the existing path; retry re-uploads only if the bubble has no `fileUrl` yet.
+- **The server decides `messageType`** from the real mimetype (`messageTypeForMime`); never trust or send a client-chosen type. SVG is deliberately `file`, not `image` — it's the one image format that can carry scripts.
+- **Files are served from `/uploads` (outside `/api`, so image loads don't eat the rate limit)** with two header overrides in `app.js`: helmet's default `Cross-Origin-Resource-Policy: same-origin` would block the Vite origin from embedding images entirely, and anything not on the inline-extension whitelist gets `Content-Disposition: attachment` so an uploaded HTML/SVG can't execute in the backend's origin. Names on disk are random hex; the user's filename lives only in `fileName` (decoded latin1→utf8, or Turkish names arrive as mojibake).
+- **`fileUrl` is stored relative** (`/uploads/…`); the client resolves it via `api.resolveFileUrl`. Captions (`content` on attachment messages) are encrypted like any text; `fileUrl` is not.
+- The optimistic bubble carries two client-only fields: the `File` itself (for retry) and `localPreviewUrl` (blob URL for images, revoked on ack). Uploads land in `backend/uploads/`, which is gitignored.
 
 Two socket-layer notes for whoever builds these. A new handler file must be added to the `deps` wiring list in `config/socket.js` or it registers nothing. And `services/socket.js` dispatches through a **single callback slot per event** (`_registerListener` overwrites), so a second consumer of an existing event silently replaces the first — add a new event name rather than sharing one.
 

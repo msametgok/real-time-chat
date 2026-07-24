@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const rateLimit = require('express-rate-limit');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -7,6 +8,7 @@ const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const logger = require('./config/logger');
+const { isInlineFile, UPLOADS_DIR } = require('./utils/uploads');
 
 const app = express();
 
@@ -50,6 +52,21 @@ app.use('/api', apiLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/chat', chatRoutes);
+
+// Uploaded chat files. Outside /api on purpose - the rate limiter would count
+// every <img> load. Two header overrides:
+//  - helmet's default Cross-Origin-Resource-Policy: same-origin would stop
+//    the Vite-origin client from embedding these images at all;
+//  - anything not on the inline whitelist is forced to download, so an
+//    uploaded HTML/SVG file cannot run scripts in this origin.
+app.use('/uploads', express.static(UPLOADS_DIR, {
+  setHeaders: (res, filePath) => {
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    if (!isInlineFile(filePath)) {
+      res.setHeader('Content-Disposition', 'attachment');
+    }
+  }
+}));
 
 // Handle 404 Not Found for any unhandled routes
 app.use((req, res, next) => {
