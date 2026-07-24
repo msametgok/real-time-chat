@@ -153,9 +153,7 @@ Conventions worth knowing, introduced during the remediation and the 2026-07-20 
 
 ### Known bugs, not yet fixed
 
-Found during verification and deliberately left; not a regression.
-
-1. **The join repair has no retry cap.** `handleChatError` drops the chat id from `joinedChatsRef` so a rejected `joinChat` is re-attempted — correct for a transient failure, but the retry rides on `chats` changing, and `chats` changes on every incoming message. A permanently-denied chat that stayed in the list would produce a steady trickle of doomed joins. Bounded in practice only because the refetch drops the chat. A per-chat backoff or attempt cap would close it.
+None currently. The last one — the join repair having no retry cap — was closed on 2026-07-24: `joinFailuresRef` in `ChatContext` counts rejected joins per chat and the join effect stops after `MAX_JOIN_ATTEMPTS` (3). The counts reset on reconnect and are swept when a chat leaves the list (a `chatRestored` chat keeps its id, so the sweep is what lets it join again). Note the counter also increments on a rejected `leaveChat` — `chatError` doesn't say which emit failed — which is accepted imprecision.
 
 Known-incomplete features, roughly in order of how much is already done for you:
 

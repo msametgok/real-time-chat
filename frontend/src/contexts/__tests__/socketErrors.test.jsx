@@ -124,6 +124,38 @@ describe('chatError', () => {
         expect(result.current.chats).toHaveLength(3);
     });
 
+    // The counterweight to the retry above: without a cap, a permanently
+    // denied chat that stays in the list re-attempts on every incoming
+    // message, forever. Three strikes and the join effect leaves it alone
+    // until a reconnect or a list change wipes the count.
+    it('gives up on a chat after three rejected joins', async () => {
+        await renderConnected();
+
+        const rejectJoin = () =>
+            act(() => chatErrorHandler({ chatId: CHAT_1, message: 'Access denied.' }));
+        // Any change to `chats` re-runs the join effect; a new chat is the
+        // realistic trigger.
+        const bumpChats = (id, updatedAt) => act(() => newChatHandler({
+            _id: id,
+            participants: [{ _id: 'user-1' }, { _id: 'user-3' }],
+            updatedAt
+        }));
+
+        rejectJoin();                                   // attempt 1 failed
+        bumpChats('chat-3', '2026-07-19T11:00:00Z');
+        await waitFor(() => expect(joinCallsFor(CHAT_1)).toBe(2));
+
+        rejectJoin();                                   // attempt 2 failed
+        bumpChats('chat-4', '2026-07-19T12:00:00Z');
+        await waitFor(() => expect(joinCallsFor(CHAT_1)).toBe(3));
+
+        rejectJoin();                                   // attempt 3 failed - capped
+        bumpChats('chat-5', '2026-07-19T13:00:00Z');
+        // The effect ran (the new chat joined), but the capped chat did not.
+        await waitFor(() => expect(joinCallsFor('chat-5')).toBe(1));
+        expect(joinCallsFor(CHAT_1)).toBe(3);
+    });
+
     it('surfaces the server message', async () => {
         const { result } = await renderConnected();
 

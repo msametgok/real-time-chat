@@ -27,6 +27,14 @@ const makeUUID = () => {
 
 export const ChatContext = createContext(null);
 
+// How many rejected joinChat attempts a chat gets before the join effect stops
+// retrying it. Without a cap, a permanently-denied chat that stayed in the
+// list would re-attempt on every incoming message (the effect re-runs on every
+// `chats` change) and re-raise the error banner each time. The counter resets
+// on reconnect and when the chat leaves the list, so a transient failure is
+// never locked out for the whole session.
+const MAX_JOIN_ATTEMPTS = 3;
+
 /**
  * Newest chat first. Written out five times before this; every writer of
  * `chats` has to re-sort, since any of them can change updatedAt.
@@ -135,6 +143,12 @@ export function ChatProvider({ children }) {
   // to the join effect below because handleChatError has to repair it: a failed
   // join must not leave the id in this set.
   const joinedChatsRef = useRef(new Set());
+
+  // Rejected-join counts by chat id, capped at MAX_JOIN_ATTEMPTS by the join
+  // effect. Never decremented on success (nothing consumes the joinedChat
+  // ack); instead it is rebuilt empty on reconnect and swept when a chat
+  // leaves the list.
+  const joinFailuresRef = useRef(new Map());
 
   // 1) Fetch all chats
   const fetchChats = useCallback(async () => {
@@ -617,9 +631,17 @@ const handleMessageDeliveryUpdate = useCallback(
   // records the id at emit time, so if we leave a failed join in the set the
   // effect below sees "already joined" and never retries. The room stays
   // unjoined for the whole session and that chat silently receives no realtime
-  // updates until a reload. Drop the id so the next chats change re-attempts.
+  // updates until a reload. Drop the id so the next chats change re-attempts,
+  // and count the failure so the join effect can stop after MAX_JOIN_ATTEMPTS
+  // rather than retrying a permanently-denied chat on every incoming message.
   const handleChatError = useCallback(({ chatId, message }) => {
-    if (chatId) joinedChatsRef.current.delete(chatId);
+    if (chatId) {
+      joinedChatsRef.current.delete(chatId);
+      joinFailuresRef.current.set(
+        chatId,
+        (joinFailuresRef.current.get(chatId) ?? 0) + 1
+      );
+    }
     raiseRealtimeError(message || 'Lost access to a chat. Reconnecting...');
   }, [raiseRealtimeError]);
 
@@ -727,10 +749,12 @@ const handleMessageDeliveryUpdate = useCallback(
 
     const currentChatIds = new Set(chats.map(c => c._id));
     const joinedChats = joinedChatsRef.current;
+    const joinFailures = joinFailuresRef.current;
 
-    // Join newly added chats
+    // Join newly added chats, unless the server has already rejected this one
+    // MAX_JOIN_ATTEMPTS times. The reconnect handler (6.6) resets the counts.
     currentChatIds.forEach(id => {
-      if (!joinedChats.has(id)) {
+      if (!joinedChats.has(id) && (joinFailures.get(id) ?? 0) < MAX_JOIN_ATTEMPTS) {
         socketService.joinChat(id);
         joinedChats.add(id);
       }
@@ -742,6 +766,14 @@ const handleMessageDeliveryUpdate = useCallback(
         socketService.leaveChat(id);
         joinedChats.delete(id);
       }
+    });
+
+    // A capped-out chat is not in joinedChats, so the sweep above never sees
+    // it. Clear its failure count when it leaves the list — a soft-deleted
+    // chat that comes back via chatRestored keeps the same id and must be
+    // allowed to join again.
+    joinFailures.forEach((_, id) => {
+      if (!currentChatIds.has(id)) joinFailures.delete(id);
     });
   }, [hasConnected, chats]);
 
@@ -797,6 +829,9 @@ const handleMessageDeliveryUpdate = useCallback(
         resyncRef.current;
 
       // Re-join every chat regardless of joinedChatsRef; server will ignore duplicates.
+      // A fresh connection also wipes the failure counts - whatever rejected a
+      // join before may hold no longer, so every chat gets a clean slate.
+      joinFailuresRef.current = new Map();
       currentChats.forEach(c => socketService.joinChat(c._id));
       joinedChatsRef.current = new Set(currentChats.map(c => c._id));
 
