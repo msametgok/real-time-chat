@@ -1,11 +1,14 @@
 const express = require('express');
-const { 
+const {
     createOneOnOneChat,
     createGroupChat,
     getChatMessages,
     getUserChats,
     deleteOrLeaveChat,
     getChatDetails,
+    updateGroupChatDetails,
+    addGroupParticipants,
+    removeGroupParticipant,
 } = require('../controllers/chatController');
 const verifyToken = require('../config/auth');
 const { requireChatParticipant, uploadChatFile } = require('../controllers/uploadController');
@@ -23,6 +26,10 @@ router.get('/:chatId', getChatDetails);
 router.delete('/:chatId', deleteOrLeaveChat)
 // Participant check runs before multer so a denied upload never touches disk.
 router.post('/:chatId/upload', requireChatParticipant, uploadSingleFile, uploadChatFile);
+// Group admin actions - the controllers gate on groupAdmin themselves.
+router.put('/:chatId/group', updateGroupChatDetails);
+router.post('/:chatId/participants', addGroupParticipants);
+router.delete('/:chatId/participants/:userId', removeGroupParticipant);
 
 
 

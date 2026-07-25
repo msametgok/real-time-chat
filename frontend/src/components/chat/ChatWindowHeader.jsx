@@ -3,6 +3,7 @@ import { useChat } from '../../hooks/useChat';
 import { useAuth } from '../../hooks/useAuth';
 import { ChevronLeft, MoreVertical } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import GroupInfoModal from './GroupInfoModal';
 
 function ChatWindowHeader() {
   const { activeChat, selectChat, presence, deleteChat } = useChat();
@@ -12,6 +13,8 @@ function ChatWindowHeader() {
   const [isConfirming, setIsConfirming] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
   const [removeError, setRemoveError] = useState(null);
+  // Separate from the menu: the modal outlives the menu that opened it.
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
   const menuRef = useRef(null);
 
   const closeMenu = () => {
@@ -80,12 +83,17 @@ function ChatWindowHeader() {
   const { displayChatName, chatAvatar, isGroupChat } = activeChat;
 
   return (
-    // `relative z-30` is load-bearing, not decoration. backdrop-blur-sm sets
-    // backdrop-filter, and any value other than `none` makes this header a
-    // stacking context - which traps the options menu's z-20 INSIDE it. The
-    // menu then painted behind MessageList (a later sibling), so over a long
-    // chat the dropdown, and worse the red confirm button, were buried under
-    // the message bubbles and only clickable through the gaps between them.
+    <>
+    {/* The modal must live OUTSIDE the header: backdrop-blur makes the header
+        a stacking context AND a containing block (gotcha 10), which would pin
+        a fixed inset-0 overlay to the header's box instead of the viewport. */}
+    <GroupInfoModal isOpen={showGroupInfo} onClose={() => setShowGroupInfo(false)} />
+    {/* `relative z-30` is load-bearing, not decoration. backdrop-blur-sm sets
+        backdrop-filter, and any value other than `none` makes this header a
+        stacking context - which traps the options menu's z-20 INSIDE it. The
+        menu then painted behind MessageList (a later sibling), so over a long
+        chat the dropdown, and worse the red confirm button, were buried under
+        the message bubbles and only clickable through the gaps between them. */}
     <header className="relative z-30 flex items-center justify-between py-3 px-4 bg-slate-800 backdrop-blur-sm shadow-sm border-b border-slate-700">
       {/* Left side: back button (<md) + avatar */}
       <div className="flex items-center space-x-3">
@@ -139,14 +147,26 @@ function ChatWindowHeader() {
                        shadow-xl z-20 p-2"
           >
             {!isConfirming ? (
-              <button
-                role="menuitem"
-                onClick={() => setIsConfirming(true)}
-                className="w-full text-left px-3 py-2 rounded text-sm text-red-300
-                           hover:bg-slate-700"
-              >
-                {isGroupChat ? 'Leave group' : 'Delete chat'}
-              </button>
+              <>
+                {isGroupChat && (
+                  <button
+                    role="menuitem"
+                    onClick={() => { setShowGroupInfo(true); closeMenu(); }}
+                    className="w-full text-left px-3 py-2 rounded text-sm text-slate-200
+                               hover:bg-slate-700"
+                  >
+                    Group info
+                  </button>
+                )}
+                <button
+                  role="menuitem"
+                  onClick={() => setIsConfirming(true)}
+                  className="w-full text-left px-3 py-2 rounded text-sm text-red-300
+                             hover:bg-slate-700"
+                >
+                  {isGroupChat ? 'Leave group' : 'Delete chat'}
+                </button>
+              </>
             ) : (
               <div className="p-1 space-y-3">
                 {/* Says what actually happens: a 1-on-1 delete only hides the
@@ -183,6 +203,7 @@ function ChatWindowHeader() {
         )}
       </div>
     </header>
+    </>
   );
 }
 

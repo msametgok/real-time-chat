@@ -204,6 +204,23 @@ const api = {
         return `${API_URL}${fileUrl}`;
     },
 
+    /**
+     * Group admin actions. All admin-gated server-side; the server broadcasts
+     * groupUpdated (and newChat / removedFromGroup where relevant), so callers
+     * do not need to patch local state on success.
+     */
+    async updateGroupChat(chatId, updates, token) {
+        return this.request(`/api/chat/${chatId}/group`, 'PUT', updates, token);
+    },
+
+    async addGroupParticipants(chatId, userIds, token) {
+        return this.request(`/api/chat/${chatId}/participants`, 'POST', { userIds }, token);
+    },
+
+    async removeGroupParticipant(chatId, userId, token) {
+        return this.request(`/api/chat/${chatId}/participants/${userId}`, 'DELETE', null, token);
+    },
+
     async searchUsers(keyword, token, { limit = 10, page = 1 } = {}) {
         const params = new URLSearchParams({ limit: String(limit), page: String(page) });
         // Only send `keyword` when there is one: the server treats a missing

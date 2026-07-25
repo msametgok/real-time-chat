@@ -500,7 +500,187 @@ exports.deleteOrLeaveChat = [
     }
 ];
 
-// --- Placeholder for future functionalities ---
-// exports.updateGroupChatDetails = [ /* ... */ ]; // e.g., rename group, change group avatar
-// exports.addParticipantToGroup = [ /* ... */ ];
-// exports.removeParticipantFromGroup = [ /* ... */ ]; // Admin action
+// --- Group admin actions ---
+// All three follow the same shape: hydrated chat, group check, admin check,
+// mutate + save (the Chat pre-validate hook enforces the 2-member floor),
+// invalidate cache, then broadcast. Clients are told only *that* the group
+// changed ('groupUpdated' { chatId }) and refetch - a payload-free event
+// cannot go stale and the refetch returns per-viewer formatted chats anyway.
+
+const emitGroupUpdated = (chatId) => {
+    try {
+        const io = getIO();
+        if (!io) return;
+        io.to(chatId.toString()).emit('groupUpdated', { chatId: chatId.toString() });
+    } catch (error) {
+        logger.error(`Failed to emit groupUpdated for chat ${chatId}: ${error.message}`, error);
+    }
+};
+
+// Loads the chat and answers the error response itself when the caller may
+// not administer it. Returns null in that case - the caller just returns.
+const loadChatAsAdmin = async (chatId, currentUserId, res) => {
+    const chat = await Chat.findById(chatId);
+    if (!chat || !isParticipant(chat, currentUserId)) {
+        // Missing and forbidden stay indistinguishable, like everywhere else.
+        res.status(404).json({ message: 'Chat not found or you are not a participant.' });
+        return null;
+    }
+    if (!chat.isGroupChat) {
+        res.status(400).json({ message: 'This is not a group chat.' });
+        return null;
+    }
+    if (!chat.groupAdmin || !chat.groupAdmin.equals(currentUserId)) {
+        res.status(403).json({ message: 'Only the group admin can do this.' });
+        return null;
+    }
+    return chat;
+};
+
+// 7. Rename a group / change its avatar (admin only)
+exports.updateGroupChatDetails = [
+    param('chatId').isMongoId().withMessage('Invalid Chat ID format.'),
+    body('chatName').optional().trim()
+        .isLength({ min: 1, max: 100 }).withMessage('Group name must be 1-100 characters.'),
+    // checkFalsy lets an empty string through as "remove the avatar".
+    body('groupAvatarUrl').optional({ checkFalsy: true }).trim()
+        .isURL().withMessage('Avatar must be a valid URL.'),
+    handleValidation,
+    async (req, res) => {
+        const { chatId } = req.params;
+        const currentUserId = req.user.userId;
+        const { chatName, groupAvatarUrl } = req.body;
+
+        if (chatName === undefined && groupAvatarUrl === undefined) {
+            return res.status(400).json({ message: 'Nothing to update.' });
+        }
+
+        try {
+            const chat = await loadChatAsAdmin(chatId, currentUserId, res);
+            if (!chat) return;
+
+            if (chatName !== undefined) chat.chatName = chatName;
+            if (groupAvatarUrl !== undefined) chat.groupAvatarUrl = groupAvatarUrl || null;
+            await chat.save();
+
+            await invalidateChatCache(chat.participants.map(p => p.toString()));
+            emitGroupUpdated(chatId);
+            res.status(200).json({ message: 'Group updated.' });
+        } catch (error) {
+            logger.error(`Error updating group ${chatId}: ${error.message}`, error);
+            res.status(500).json({ message: 'Server error while updating the group.' });
+        }
+    }
+];
+
+// 8. Add members to a group (admin only)
+exports.addGroupParticipants = [
+    param('chatId').isMongoId().withMessage('Invalid Chat ID format.'),
+    body('userIds').isArray({ min: 1 }).withMessage('userIds must be a non-empty array.'),
+    body('userIds.*').isMongoId().withMessage('Invalid user ID format.'),
+    handleValidation,
+    async (req, res) => {
+        const { chatId } = req.params;
+        const currentUserId = req.user.userId;
+
+        try {
+            const chat = await loadChatAsAdmin(chatId, currentUserId, res);
+            if (!chat) return;
+
+            const existing = new Set(chat.participants.map(p => p.toString()));
+            const requestedIds = [...new Set(req.body.userIds.map(String))]
+                .filter(id => !existing.has(id));
+            if (requestedIds.length === 0) {
+                return res.status(400).json({ message: 'Everyone in the list is already a member.' });
+            }
+
+            // Only add users that actually exist - a typo'd id must not become
+            // a ghost participant that breaks every later .username access.
+            const users = await User.find({ _id: { $in: requestedIds } }).select('_id').lean();
+            const addedIds = users.map(u => u._id.toString());
+            if (addedIds.length === 0) {
+                return res.status(404).json({ message: 'No such users.' });
+            }
+
+            chat.participants.push(...addedIds);
+            await chat.save();
+
+            await invalidateChatCache([...existing, ...addedIds]);
+
+            // New members' open sockets join the room server-side - they can't
+            // join themselves because their client doesn't know the chat yet.
+            // The per-viewer 'newChat' is what puts it in their sidebar; the
+            // room join is what makes messages arrive from that moment on.
+            const io = getIO();
+            const populated = await Chat.findById(chatId)
+                .populate('participants', 'username email avatar')
+                .populate({
+                    path: 'latestMessage',
+                    populate: { path: 'sender', select: 'username avatar' }
+                })
+                .populate('groupAdmin', 'username avatar')
+                .lean();
+            for (const id of addedIds) {
+                if (io) {
+                    io.in(`user-${id}`).socketsJoin(chatId.toString());
+                    io.to(`user-${id}`).emit('newChat', formatChatResponse(populated, id));
+                }
+            }
+            // Existing members just see the group change.
+            emitGroupUpdated(chatId);
+
+            res.status(200).json({ message: 'Members added.', addedIds });
+        } catch (error) {
+            logger.error(`Error adding members to group ${chatId}: ${error.message}`, error);
+            res.status(500).json({ message: 'Server error while adding members.' });
+        }
+    }
+];
+
+// 9. Remove a member from a group (admin only)
+exports.removeGroupParticipant = [
+    param('chatId').isMongoId().withMessage('Invalid Chat ID format.'),
+    param('userId').isMongoId().withMessage('Invalid user ID format.'),
+    handleValidation,
+    async (req, res) => {
+        const { chatId, userId: targetId } = req.params;
+        const currentUserId = req.user.userId;
+
+        try {
+            const chat = await loadChatAsAdmin(chatId, currentUserId, res);
+            if (!chat) return;
+
+            if (targetId === currentUserId.toString()) {
+                return res.status(400).json({ message: 'Leave the group instead of removing yourself.' });
+            }
+            if (!chat.participants.some(p => p.equals(targetId))) {
+                return res.status(404).json({ message: 'That user is not a member of this group.' });
+            }
+            // The schema's pre-validate enforces this on save too, but a clear
+            // message beats a validation error.
+            if (chat.participants.length - 1 < 2) {
+                return res.status(400).json({ message: 'A group needs at least 2 members. Leave or delete the group instead.' });
+            }
+
+            chat.participants = chat.participants.filter(p => !p.equals(targetId));
+            await chat.save();
+
+            await invalidateChatCache([targetId, ...chat.participants.map(p => p.toString())]);
+
+            const io = getIO();
+            if (io) {
+                // Order matters: pull their sockets from the room FIRST so the
+                // groupUpdated below cannot reach them, then tell them via the
+                // personal room they never leave.
+                io.in(`user-${targetId}`).socketsLeave(chatId.toString());
+                io.to(`user-${targetId}`).emit('removedFromGroup', { chatId: chatId.toString() });
+            }
+            emitGroupUpdated(chatId);
+
+            res.status(200).json({ message: 'Member removed.' });
+        } catch (error) {
+            logger.error(`Error removing member from group ${chatId}: ${error.message}`, error);
+            res.status(500).json({ message: 'Server error while removing the member.' });
+        }
+    }
+];

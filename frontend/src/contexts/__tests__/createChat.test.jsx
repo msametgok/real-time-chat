@@ -29,6 +29,8 @@ vi.mock('../../services/socket', () => ({
         onMessageEdited: vi.fn(), offMessageEdited: vi.fn(),
         onMessageDeletedForEveryone: vi.fn(), offMessageDeletedForEveryone: vi.fn(),
         onMessageDeletedForMe: vi.fn(), offMessageDeletedForMe: vi.fn(),
+        onGroupUpdated: vi.fn(), offGroupUpdated: vi.fn(),
+        onRemovedFromGroup: vi.fn(), offRemovedFromGroup: vi.fn(),
         onMessageError: vi.fn(), offMessageError: vi.fn(),
         onChatError: vi.fn(), offChatError: vi.fn(),
         onStatusError: vi.fn(), offStatusError: vi.fn(),

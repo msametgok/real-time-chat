@@ -35,6 +35,8 @@ vi.mock('../../services/socket', () => ({
         onMessageEdited: vi.fn(cb => { messageEditedHandler = cb; }), offMessageEdited: vi.fn(),
         onMessageDeletedForEveryone: vi.fn(cb => { messageDeletedForEveryoneHandler = cb; }), offMessageDeletedForEveryone: vi.fn(),
         onMessageDeletedForMe: vi.fn(cb => { messageDeletedForMeHandler = cb; }), offMessageDeletedForMe: vi.fn(),
+        onGroupUpdated: vi.fn(), offGroupUpdated: vi.fn(),
+        onRemovedFromGroup: vi.fn(), offRemovedFromGroup: vi.fn(),
         onMessageError: vi.fn(), offMessageError: vi.fn(),
         onChatError: vi.fn(), offChatError: vi.fn(),
         onStatusError: vi.fn(), offStatusError: vi.fn(),

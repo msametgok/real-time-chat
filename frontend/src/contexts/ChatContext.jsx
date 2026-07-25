@@ -150,11 +150,14 @@ export function ChatProvider({ children }) {
   // leaves the list.
   const joinFailuresRef = useRef(new Map());
 
-  // 1) Fetch all chats
+  // 1) Fetch all chats. Also RETURNS the normalized list: `setChats` is
+  // queued, so a caller that needs the fresh data on the next line (the
+  // groupUpdated handler refreshing activeChat) cannot read it from state or
+  // chatsRef yet (gotcha 5).
   const fetchChats = useCallback(async () => {
     if (!isAuthenticated || !user?.token) {
       setChats([]);
-      return;
+      return [];
     }
     setIsLoadingChats(true);
     setChatError(null);
@@ -167,10 +170,12 @@ export function ChatProvider({ children }) {
         unreadCount: c.unreadCount || 0
       }));
       setChats(sortChats(normalized));
+      return normalized;
     } catch (err) {
       console.error("ChatContext: fetchChats error", err);
       setChatError(err.message || "Failed to load chats");
       setChats([]);
+      return [];
     } finally {
       setIsLoadingChats(false);
     }
@@ -835,6 +840,31 @@ const handleMessageDeliveryUpdate = useCallback(
     setMessages(prev => prev.filter(m => m._id !== messageId));
   }, []);
 
+  // A group changed (name, avatar, membership). The event carries only the
+  // id on purpose - the refetch returns per-viewer formatted chats and can't
+  // go stale. The open chat is refreshed from the RETURN value of fetchChats:
+  // its setChats is still queued at this point, so chatsRef would be stale.
+  const handleGroupUpdated = useCallback(async ({ chatId }) => {
+    const fresh = await fetchChats();
+    if (activeChatRef.current?._id === chatId) {
+      const updated = fresh.find(c => c._id === chatId);
+      if (updated) setActiveChat(updated);
+    }
+  }, [fetchChats]);
+
+  // The admin removed us. The server already pulled our sockets from the
+  // room, so no leaveChat emit here - we are no longer a participant and it
+  // would only bounce back as a chatError. Mirror the local cleanup that
+  // deleting a chat does.
+  const handleRemovedFromGroup = useCallback(({ chatId }) => {
+    setChats(prev => prev.filter(c => c._id !== chatId));
+    joinedChatsRef.current.delete(chatId);
+    if (activeChatRef.current?._id === chatId) {
+      setActiveChat(null);
+      setMessages([]);
+    }
+  }, []);
+
   // â”€â”€â”€ 5) REGISTER HANDLERS â”€â”€â”€
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -850,6 +880,8 @@ const handleMessageDeliveryUpdate = useCallback(
     socketService.onMessageEdited(handleMessageEdited);
     socketService.onMessageDeletedForEveryone(handleMessageDeletedForEveryone);
     socketService.onMessageDeletedForMe(handleMessageDeletedForMe);
+    socketService.onGroupUpdated(handleGroupUpdated);
+    socketService.onRemovedFromGroup(handleRemovedFromGroup);
     socketService.onMessageError(handleMessageError);
     socketService.onChatError(handleChatError);
     socketService.onStatusError(handleStatusError);
@@ -866,6 +898,8 @@ const handleMessageDeliveryUpdate = useCallback(
       socketService.offMessageEdited(handleMessageEdited);
       socketService.offMessageDeletedForEveryone(handleMessageDeletedForEveryone);
       socketService.offMessageDeletedForMe(handleMessageDeletedForMe);
+      socketService.offGroupUpdated(handleGroupUpdated);
+      socketService.offRemovedFromGroup(handleRemovedFromGroup);
       socketService.offMessageError(handleMessageError);
       socketService.offChatError(handleChatError);
       socketService.offStatusError(handleStatusError);
@@ -883,6 +917,8 @@ const handleMessageDeliveryUpdate = useCallback(
     handleMessageEdited,
     handleMessageDeletedForEveryone,
     handleMessageDeletedForMe,
+    handleGroupUpdated,
+    handleRemovedFromGroup,
     handleMessageError,
     handleChatError,
     handleStatusError
@@ -1199,6 +1235,35 @@ const handleMessageDeliveryUpdate = useCallback(
     [isAuthenticated, user?.token]
   );
 
+  // Group admin actions. Like the create helpers, these THROW instead of
+  // touching chatError (which would blank the sidebar behind the modal) -
+  // GroupInfoModal catches and shows the message inline. No local state
+  // patching on success: the server's groupUpdated broadcast reaches this
+  // client too, and handleGroupUpdated refetches.
+  const updateGroupChatAPI = useCallback(
+    async (chatId, updates) => {
+      if (!isAuthenticated || !user?.token) throw new Error('User not authenticated');
+      return api.updateGroupChat(chatId, updates, user.token);
+    },
+    [isAuthenticated, user?.token]
+  );
+
+  const addGroupParticipantsAPI = useCallback(
+    async (chatId, userIds) => {
+      if (!isAuthenticated || !user?.token) throw new Error('User not authenticated');
+      return api.addGroupParticipants(chatId, userIds, user.token);
+    },
+    [isAuthenticated, user?.token]
+  );
+
+  const removeGroupParticipantAPI = useCallback(
+    async (chatId, userId) => {
+      if (!isAuthenticated || !user?.token) throw new Error('User not authenticated');
+      return api.removeGroupParticipant(chatId, userId, user.token);
+    },
+    [isAuthenticated, user?.token]
+  );
+
   const contextValue = {
     chats,
     activeChat,
@@ -1213,6 +1278,9 @@ const handleMessageDeliveryUpdate = useCallback(
     selectChat,
     createOneOnOneChatAPI,
     createGroupChatAPI,
+    updateGroupChatAPI,
+    addGroupParticipantsAPI,
+    removeGroupParticipantAPI,
     searchUsers,
     deleteChat,
     hasConnected,

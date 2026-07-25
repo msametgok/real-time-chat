@@ -164,7 +164,14 @@ Known-incomplete features, roughly in order of how much is already done for you:
 | ~~View / edit own profile~~ | done | **done** — `ProfileModal` |
 | ~~File & image upload~~ | **done** — `POST /api/chat/:chatId/upload` | **done** — attach button, `sendAttachment`, bubble rendering |
 | ~~Message edit / delete~~ | **done** — `editMessage` / `deleteMessageForMe` / `deleteMessageForEveryone` socket events | **done** — bubble hover menu, inline edit, tombstone |
-| Group admin actions | commented stubs, `chatController.js:417` | none |
+| ~~Group admin actions~~ | **done** — rename/avatar, add members, remove member (HTTP, admin-gated) | **done** — `GroupInfoModal` from the header menu |
+
+Group admin notes (added 2026-07-24):
+- Three HTTP endpoints in `chatController.js` (`PUT /:chatId/group`, `POST /:chatId/participants`, `DELETE /:chatId/participants/:userId`), all gated on `chat.groupAdmin`. Missing and forbidden chats both answer 404, like everywhere else.
+- **Realtime is a payload-free `groupUpdated { chatId }` to the chat room; clients refetch.** The refetch returns per-viewer formatted chats, so the event cannot go stale or leak another viewer's formatting. `handleGroupUpdated` refreshes `activeChat` from the **return value** of `fetchChats` — its `setChats` is still queued at that point, so `chatsRef` is stale (gotcha 5); this is why `fetchChats` returns the normalized list.
+- **Added members get their sockets joined to the room server-side** (`socketsJoin`) — their client can't join a room it doesn't know about yet — plus a per-viewer `newChat`, which is what puts the group in their sidebar.
+- **Removed members: `socketsLeave` runs BEFORE the room-wide `groupUpdated`**, or the broadcast would still reach them; they're told via `removedFromGroup` on the personal room they never leave. The client mirrors delete-chat cleanup but must NOT emit `leaveChat` — no longer being a participant, it would only bounce back as a `chatError`.
+- The admin can't remove themselves (leave instead — `deleteOrLeaveChat` reassigns the admin role), and a group can't shrink below 2 members.
 
 Message edit/delete notes (added 2026-07-24):
 - **All three handlers update with `updateOne`/`findOneAndUpdate`, never `save()`** — the `Message` post-save hook would overwrite `Chat.latestMessage` with an old message and un-hide soft-deleted chats. The flip side: the hook's cache invalidation doesn't run either, so edit and delete-for-everyone call `invalidateChatCache` themselves (it's back in the socket `deps` for exactly this).

@@ -37,6 +37,8 @@ class SocketService {
       messageEdited: null,
       messageDeletedForEveryone: null,
       messageDeletedForMe: null,
+      groupUpdated: null,
+      removedFromGroup: null,
       chatError: null,
       messageError: null,
       statusError: null,
@@ -121,6 +123,8 @@ class SocketService {
     this.socket.on('messageEdited', data => this.eventCallbacks.messageEdited?.(data));
     this.socket.on('messageDeletedForEveryone', data => this.eventCallbacks.messageDeletedForEveryone?.(data));
     this.socket.on('messageDeletedForMe', data => this.eventCallbacks.messageDeletedForMe?.(data));
+    this.socket.on('groupUpdated', data => this.eventCallbacks.groupUpdated?.(data));
+    this.socket.on('removedFromGroup', data => this.eventCallbacks.removedFromGroup?.(data));
     this.socket.on('chatError', data => this.eventCallbacks.chatError?.(data));
     this.socket.on('messageError', data => this.eventCallbacks.messageError?.(data));
     this.socket.on('statusError', data => this.eventCallbacks.statusError?.(data));
@@ -214,6 +218,15 @@ class SocketService {
   // disappear from the user's other open tabs.
   onMessageDeletedForMe(cb) { this._registerListener('messageDeletedForMe', cb); }
   offMessageDeletedForMe(cb) { this._unregisterListener('messageDeletedForMe', cb); }
+
+  // Payload-free change signal for group admin actions - clients refetch.
+  onGroupUpdated(cb) { this._registerListener('groupUpdated', cb); }
+  offGroupUpdated(cb) { this._unregisterListener('groupUpdated', cb); }
+
+  // Personal-room event: the server already pulled this user's sockets from
+  // the chat room before sending it.
+  onRemovedFromGroup(cb) { this._registerListener('removedFromGroup', cb); }
+  offRemovedFromGroup(cb) { this._unregisterListener('removedFromGroup', cb); }
 
   // All three error channels are consumed by ChatContext. chatError is not
   // only a message: it also repairs joinedChatsRef, which would otherwise keep
