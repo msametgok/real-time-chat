@@ -475,6 +475,32 @@ export function ChatProvider({ children }) {
     }
   }, [uploadAndEmit]);
 
+  // Edit and the two deletes have NO optimistic apply: the server's broadcast
+  // (messageEdited / messageDeletedFor*) is what updates state, for the sender
+  // too. All there is to handle locally is a dropped emit - say so instead of
+  // silently doing nothing. The 15-minute edit window is enforced server-side;
+  // the bubble menu merely hides the option (see MessageBubble).
+  const editMessage = useCallback((chatId, messageId, content) => {
+    if (!chatId || !messageId || !content?.trim()) return false;
+    const sent = socketService.editMessage(chatId, messageId, content.trim());
+    if (!sent) setMessagesError('You appear to be offline. Edit not saved.');
+    return sent;
+  }, []);
+
+  const deleteMessageForMe = useCallback((chatId, messageId) => {
+    if (!chatId || !messageId) return false;
+    const sent = socketService.deleteMessageForMe(chatId, messageId);
+    if (!sent) setMessagesError('You appear to be offline. Message not deleted.');
+    return sent;
+  }, []);
+
+  const deleteMessageForEveryone = useCallback((chatId, messageId) => {
+    if (!chatId || !messageId) return false;
+    const sent = socketService.deleteMessageForEveryone(chatId, messageId);
+    if (!sent) setMessagesError('You appear to be offline. Message not deleted.');
+    return sent;
+  }, []);
+
   const typingStart = useCallback((chatId) => {
     if (!chatId) return;
     socketService.typingStart(chatId);
@@ -767,6 +793,48 @@ const handleMessageDeliveryUpdate = useCallback(
     raiseRealtimeError(message || 'Could not update message status.');
   }, [raiseRealtimeError]);
 
+  // An edit lands for everyone - sender included - through this one event;
+  // there is no optimistic apply to reconcile. `messages` only holds the
+  // active chat, so a foreign chatId simply maps over nothing.
+  const handleMessageEdited = useCallback(({ chatId, messageId, content, editedAt }) => {
+    setMessages(prev =>
+      prev.map(m => (m._id === messageId ? { ...m, content, editedAt } : m))
+    );
+    // The sidebar may be previewing exactly this message.
+    setChats(prev =>
+      prev.map(c => (c._id === chatId && c.latestMessage?._id === messageId
+        ? { ...c, latestMessage: { ...c.latestMessage, content, editedAt } }
+        : c))
+    );
+  }, []);
+
+  // The server has already blanked the document; mirror that shape so the
+  // bubble renders the tombstone and no stale payload lingers in state.
+  const handleMessageDeletedForEveryone = useCallback(({ chatId, messageId }) => {
+    const tombstone = m => ({
+      ...m,
+      isDeletedForEveryone: true,
+      content: undefined,
+      fileUrl: undefined,
+      fileName: undefined,
+      fileType: undefined,
+      fileSize: undefined,
+      localPreviewUrl: undefined
+    });
+    setMessages(prev => prev.map(m => (m._id === messageId ? tombstone(m) : m)));
+    setChats(prev =>
+      prev.map(c => (c._id === chatId && c.latestMessage?._id === messageId
+        ? { ...c, latestMessage: tombstone(c.latestMessage) }
+        : c))
+    );
+  }, []);
+
+  // Personal-room event: this covers both the tab that asked and the user's
+  // other open tabs. Everyone else never hears about it.
+  const handleMessageDeletedForMe = useCallback(({ messageId }) => {
+    setMessages(prev => prev.filter(m => m._id !== messageId));
+  }, []);
+
   // â”€â”€â”€ 5) REGISTER HANDLERS â”€â”€â”€
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -779,6 +847,9 @@ const handleMessageDeliveryUpdate = useCallback(
     socketService.onMessageDeliveryUpdate(handleMessageDeliveryUpdate);
     socketService.onUserConnectedToChat(handleUserConnectedToChat);
     socketService.onMessageSentAck(handleMessageSentAck);
+    socketService.onMessageEdited(handleMessageEdited);
+    socketService.onMessageDeletedForEveryone(handleMessageDeletedForEveryone);
+    socketService.onMessageDeletedForMe(handleMessageDeletedForMe);
     socketService.onMessageError(handleMessageError);
     socketService.onChatError(handleChatError);
     socketService.onStatusError(handleStatusError);
@@ -792,6 +863,9 @@ const handleMessageDeliveryUpdate = useCallback(
       socketService.offMessageDeliveryUpdate(handleMessageDeliveryUpdate);
       socketService.offUserConnectedToChat(handleUserConnectedToChat);
       socketService.offMessageSentAck(handleMessageSentAck);
+      socketService.offMessageEdited(handleMessageEdited);
+      socketService.offMessageDeletedForEveryone(handleMessageDeletedForEveryone);
+      socketService.offMessageDeletedForMe(handleMessageDeletedForMe);
       socketService.offMessageError(handleMessageError);
       socketService.offChatError(handleChatError);
       socketService.offStatusError(handleStatusError);
@@ -806,6 +880,9 @@ const handleMessageDeliveryUpdate = useCallback(
     handleMessageDeliveryUpdate,
     handleUserConnectedToChat,
     handleMessageSentAck,
+    handleMessageEdited,
+    handleMessageDeletedForEveryone,
+    handleMessageDeletedForMe,
     handleMessageError,
     handleChatError,
     handleStatusError
@@ -1146,6 +1223,9 @@ const handleMessageDeliveryUpdate = useCallback(
     sendMessage,
     sendAttachment,
     retryMessage,
+    editMessage,
+    deleteMessageForMe,
+    deleteMessageForEveryone,
     typingStart,
     typingStop,
     markMessagesAsRead

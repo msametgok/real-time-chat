@@ -16,6 +16,8 @@ const initializeStatusEventHandlers = require('../socketHandlers/statusEvents');
 const initializeDisconnectHandlers = require('../socketHandlers/disconnectEvents');
 const { computeDeliveredToAll, computeReadByAll } = require('../utils/messageStatus');
 const { syncUserSockets } = require('../utils/presence');
+const { invalidateChatCache } = require('../utils/chatCache');
+const { removeUploadedFile } = require('../utils/uploads');
 
 // Held at module scope so non-socket code (HTTP controllers) can broadcast.
 // Anything that reads this must tolerate `null` - it is unset until the server
@@ -98,10 +100,15 @@ const initializeSocket = async (server) => {
       // await runs in the same tick as the connection event, so a client emit
       // (which is at least one network hop away) can never outrun it.
       socket.join(`user-${userId}`); // synchronous
-      // invalidateChatCache is not here: no handler needs it any more. Message's
-      // post-save hook owns cache invalidation, and the controllers import it
-      // directly.
-      const deps = { io, socket, logger, redis, User, Chat, Message, encrypt, decryptMessageDoc };
+      // invalidateChatCache is back in deps for edit/delete-for-everyone:
+      // they update with updateOne PRECISELY to dodge the post-save hook
+      // (which would hijack latestMessage and un-hide soft-deleted chats),
+      // so they must invalidate the sidebar cache themselves. sendMessage
+      // still relies on the hook - do not invalidate there.
+      const deps = {
+        io, socket, logger, redis, User, Chat, Message, encrypt,
+        decryptMessageDoc, invalidateChatCache, removeUploadedFile
+      };
       initializeChatEventHandlers(deps);
       initializeTypingEventHandlers(deps);
       initializeStatusEventHandlers(deps);

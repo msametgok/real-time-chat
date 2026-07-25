@@ -349,8 +349,10 @@ exports.getChatMessages = [
                 return res.status(403).json({ message: 'Access Denied: You are not a participant of this chat or chat does not exist.' });
             }
 
-            // Construct the query for messages
-            const messageQuery = { chat: chatId };
+            // Construct the query for messages. deletedFor is the per-user
+            // "delete for me" - like Chat.deletedFor, the $ne also matches
+            // documents that predate the field, so no migration was needed.
+            const messageQuery = { chat: chatId, deletedFor: { $ne: currentUserId } };
             if (beforeTimestamp) {
                 // If 'before' timestamp is provided, fetch messages older than it
                 messageQuery.createdAt = { $lt: beforeTimestamp };

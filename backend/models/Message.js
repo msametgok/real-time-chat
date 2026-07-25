@@ -44,6 +44,23 @@ const messageSchema = new mongoose.Schema({
     metadata: {
         type: mongoose.Schema.Types.Mixed,
     },
+    // Per-user hide, mirroring Chat.deletedFor: "delete for me" adds the user
+    // here and getChatMessages filters on it. Never cleared.
+    deletedFor: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }],
+    // "Delete for everyone" (sender only). content/file fields are $unset at
+    // delete time - the tombstone carries no payload, clients render a
+    // placeholder from this flag alone.
+    isDeletedForEveryone: {
+        type: Boolean,
+        default: false
+    },
+    // Set on every successful edit; its presence is the "edited" label.
+    editedAt: {
+        type: Date
+    },
     deliveredTo: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'

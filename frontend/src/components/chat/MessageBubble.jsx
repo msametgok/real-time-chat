@@ -1,7 +1,11 @@
-import React from "react";
+import React, { useState } from "react";
 import MessageStatusTicks from "./MessageStatusTicks";
 import api from "../../services/api";
 import { formatFileSize } from "../../utils/formatFileSize";
+
+// Mirror of the server's editMessage window. Hiding the option here is
+// cosmetic - the server enforces the real limit and answers messageError.
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 const formatMessageTime = (timestamp) => {
     if (!timestamp) return "";
@@ -66,7 +70,11 @@ function AttachmentContent({ message }) {
     );
 }
 
-function MessageBubble({ message, isOwnMessage, showSenderInfo, onRetry }) {
+function MessageBubble({ message, isOwnMessage, showSenderInfo, onRetry, onEdit, onDeleteForMe, onDeleteForEveryone }) {
+    const [menuOpen, setMenuOpen] = useState(false);
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState('');
+
     // Determine bubble alignment and color based on who sent it
     const bubbleAlignment = isOwnMessage ? "items-end": "items-start";
     const bubbleColor = message.failed
@@ -75,11 +83,41 @@ function MessageBubble({ message, isOwnMessage, showSenderInfo, onRetry }) {
 
     const topMargin = showSenderInfo ? 'mt-4' : 'mt-1';
 
+    const isDeleted = !!message.isDeletedForEveryone;
+
     // fileUrl OR localPreviewUrl: a just-picked attachment has no server URL
     // yet but must already render as its file, not as an empty text bubble.
     const isAttachment =
+        !isDeleted &&
         ['image', 'video', 'audio', 'file'].includes(message.messageType) &&
         (message.fileUrl || message.localPreviewUrl || message.fileName);
+
+    // Evaluated on render, so a menu opened later re-checks the clock. The
+    // server re-checks regardless.
+    const withinEditWindow =
+        Date.now() - new Date(message.createdAt).getTime() <= EDIT_WINDOW_MS;
+    const canEdit = !!onEdit && isOwnMessage && message.messageType === 'text' && withinEditWindow;
+    const canDeleteForEveryone = !!onDeleteForEveryone && isOwnMessage;
+
+    // No menu on tombstones, or on bubbles that only exist client-side: a
+    // sending/failed message has a temp id the server has never heard of.
+    const showMenu =
+        !isDeleted && !message.sending && !message.failed &&
+        (canEdit || canDeleteForEveryone || !!onDeleteForMe);
+
+    const startEditing = () => {
+        setDraft(message.content || '');
+        setEditing(true);
+        setMenuOpen(false);
+    };
+
+    const saveEdit = () => {
+        const trimmed = draft.trim();
+        if (trimmed && trimmed !== message.content) {
+            onEdit(message._id, trimmed);
+        }
+        setEditing(false);
+    };
 
     return (
         <div className={`flex flex-col ${bubbleAlignment} ${topMargin}`}>
@@ -102,20 +140,104 @@ function MessageBubble({ message, isOwnMessage, showSenderInfo, onRetry }) {
 
             {/* Message Bubble */}
             <div
-            className={`relative max-w-xs lg:max-w-md px-4 py-2 rounded-xl shadow-md ${bubbleColor}`}
+            className={`relative group max-w-xs lg:max-w-md px-4 py-2 rounded-xl shadow-md ${bubbleColor}`}
             >
                 {showSenderInfo && (
                     <div className="font-semibold text-indigo-300 text-sm mb-1">
                     {message.sender?.username || 'User'}
                     </div>
                 )}
-                
+
+                {showMenu && (
+                    <button
+                        type="button"
+                        aria-label="Message options"
+                        onClick={() => setMenuOpen(open => !open)}
+                        className="absolute top-1 right-1 z-10 h-5 w-5 flex items-center justify-center
+                                   rounded-full bg-black/30 text-white/80 hover:text-white
+                                   opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                            <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                        </svg>
+                    </button>
+                )}
+
+                {menuOpen && (
+                    <>
+                        {/* Invisible backdrop: any click outside closes the menu. */}
+                        <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                        <div
+                            role="menu"
+                            className="absolute right-0 top-6 z-20 min-w-[11rem] py-1 rounded-md
+                                       bg-slate-900 border border-slate-700 shadow-lg text-sm text-slate-200"
+                        >
+                            {canEdit && (
+                                <button
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={startEditing}
+                                    className="block w-full text-left px-4 py-2 hover:bg-slate-700"
+                                >
+                                    Edit
+                                </button>
+                            )}
+                            {canDeleteForEveryone && (
+                                <button
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={() => { setMenuOpen(false); onDeleteForEveryone(message._id); }}
+                                    className="block w-full text-left px-4 py-2 text-red-400 hover:bg-slate-700"
+                                >
+                                    Delete for everyone
+                                </button>
+                            )}
+                            {onDeleteForMe && (
+                                <button
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={() => { setMenuOpen(false); onDeleteForMe(message._id); }}
+                                    className="block w-full text-left px-4 py-2 hover:bg-slate-700"
+                                >
+                                    Delete for me
+                                </button>
+                            )}
+                        </div>
+                    </>
+                )}
+
                 {/* break-words keeps an unbroken string inside max-w-xs instead
                     of blowing the bubble (and the list) out horizontally;
                     pre-wrap preserves the newlines Shift+Enter can now insert.
                     Attachments render their file first; `content` on them is an
                     optional caption, not a fallback placeholder. */}
-                {isAttachment ? (
+                {isDeleted ? (
+                    <div className="italic opacity-70">This message was deleted</div>
+                ) : editing ? (
+                    <div className="w-64 max-w-full">
+                        <textarea
+                            autoFocus
+                            rows={2}
+                            value={draft}
+                            onChange={e => setDraft(e.target.value)}
+                            onKeyDown={e => {
+                                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(); }
+                                if (e.key === 'Escape') setEditing(false);
+                            }}
+                            aria-label="Edit message"
+                            className="w-full rounded-md bg-slate-900/60 text-slate-100 p-2 text-sm
+                                       resize-none focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                        />
+                        <div className="flex justify-end gap-3 mt-1 text-xs">
+                            <button type="button" onClick={() => setEditing(false)} className="opacity-80 hover:opacity-100">
+                                Cancel
+                            </button>
+                            <button type="button" onClick={saveEdit} className="font-semibold hover:underline">
+                                Save
+                            </button>
+                        </div>
+                    </div>
+                ) : isAttachment ? (
                     <>
                         <AttachmentContent message={message} />
                         {message.content && (
@@ -125,7 +247,7 @@ function MessageBubble({ message, isOwnMessage, showSenderInfo, onRetry }) {
                 ) : (
                     <div className="whitespace-pre-wrap break-words">{message.content || '[Message content not available]'}</div>
                 )}
-                
+
                 {/* Timestamp and Status Ticks */}
                 <div className={`text-xs pt-1 text-right flex items-center justify-end gap-1 ${isOwnMessage ? 'text-indigo-200' : 'text-slate-400'}`}>
                     {message.failed ? (
@@ -143,8 +265,9 @@ function MessageBubble({ message, isOwnMessage, showSenderInfo, onRetry }) {
                         </>
                     ) : (
                         <>
+                            {message.editedAt && !isDeleted && <span className="italic opacity-80">edited</span>}
                             <span>{formatMessageTime(message.createdAt)}</span>
-                            {isOwnMessage && <MessageStatusTicks message={message} />}
+                            {isOwnMessage && !isDeleted && <MessageStatusTicks message={message} />}
                         </>
                     )}
                 </div>

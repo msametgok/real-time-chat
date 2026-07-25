@@ -1,11 +1,15 @@
 const { computeDeliveredToAll } = require('../utils/messageStatus');
 const { findChatForParticipant } = require('../utils/chatAuth');
 
+// How long after sending a message may still be edited. Enforced HERE - the
+// client hides the Edit option after this long, but that is cosmetic.
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
+
 // Destructure dependencies passed from main socket.js.
 // decryptMessageDoc arrives through deps rather than a direct require so the
 // handler stays testable with a fake - same reason `decrypt` used to. `decrypt`
 // itself is no longer used here now that the helper owns the fallback.
-module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decryptMessageDoc }) => {
+module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decryptMessageDoc, invalidateChatCache, removeUploadedFile }) => {
 
     socket.on('joinChat', async (data) => {
         // Declared outside the try so the catch block can actually read them -
@@ -211,6 +215,169 @@ module.exports = ({ io, socket, logger, redis, Chat, Message, encrypt, decryptMe
         } catch (error) {
             logger.error(`Error during 'sendMessage' for user ${username} (Socket: ${socket.id}), chat ${chatId}: ${error.message}`, error);
             socket.emit('messageError', { chatId, tempId, message: 'Failed to send message.' });
+        }
+    });
+
+    // All three handlers below use updateOne/findOneAndUpdate, never save():
+    // the Message post-save hook would overwrite Chat.latestMessage with this
+    // (possibly old) message and un-hide the chat for everyone who had soft
+    // deleted it. The flip side is that the hook's cache invalidation does not
+    // run either, so the handlers that change what the sidebar may be showing
+    // call invalidateChatCache themselves.
+
+    socket.on('editMessage', async (data) => {
+        let chatId;
+        let messageId;
+        const { userId, username } = socket.user;
+
+        try {
+            let content;
+            ({ chatId, messageId, content } = data || {});
+
+            if (!chatId || !messageId || !content?.trim()) {
+                return socket.emit('messageError', { chatId, message: 'chatId, messageId and content are required to edit.' });
+            }
+
+            const chat = await findChatForParticipant(Chat, chatId, userId);
+            if (!chat) {
+                logger.warn(`Unauthorized editMessage by ${username} in ${chatId}`);
+                return socket.emit('messageError', { chatId, message: 'Access denied.' });
+            }
+
+            const message = await Message.findOne({ _id: messageId, chat: chatId })
+                .select('sender messageType createdAt isDeletedForEveryone').lean();
+            if (!message || message.isDeletedForEveryone) {
+                return socket.emit('messageError', { chatId, message: 'Message not found.' });
+            }
+            if (message.sender.toString() !== userId.toString()) {
+                logger.warn(`User ${username} tried to edit someone else's message ${messageId}`);
+                return socket.emit('messageError', { chatId, message: 'You can only edit your own messages.' });
+            }
+            if (message.messageType !== 'text') {
+                return socket.emit('messageError', { chatId, message: 'Only text messages can be edited.' });
+            }
+            if (Date.now() - new Date(message.createdAt).getTime() > EDIT_WINDOW_MS) {
+                return socket.emit('messageError', { chatId, message: 'Messages can only be edited within 15 minutes of sending.' });
+            }
+
+            const trimmed = content.trim();
+            const editedAt = new Date();
+            await Message.updateOne(
+                { _id: messageId },
+                { $set: { content: encrypt(trimmed), editedAt } }
+            );
+
+            // io.to, not socket.to: the sender applies the edit from this same
+            // event - there is no optimistic apply to reconcile.
+            io.to(chatId).emit('messageEdited', {
+                chatId,
+                messageId,
+                content: trimmed,
+                editedAt: editedAt.toISOString()
+            });
+
+            // The edited message may be the sidebar preview.
+            await invalidateChatCache(chat.participants.map(p => p.toString()));
+            logger.info(`Message ${messageId} edited by ${username} in chat ${chatId}`);
+        } catch (error) {
+            logger.error(`Error during 'editMessage' for user ${username} (Socket: ${socket.id}), chat ${chatId}, message ${messageId}: ${error.message}`, error);
+            socket.emit('messageError', { chatId, message: 'Failed to edit message.' });
+        }
+    });
+
+    socket.on('deleteMessageForMe', async (data) => {
+        let chatId;
+        let messageId;
+        const { userId, username } = socket.user;
+
+        try {
+            ({ chatId, messageId } = data || {});
+
+            if (!chatId || !messageId) {
+                return socket.emit('messageError', { chatId, message: 'chatId and messageId are required to delete.' });
+            }
+
+            const chat = await findChatForParticipant(Chat, chatId, userId);
+            if (!chat) {
+                logger.warn(`Unauthorized deleteMessageForMe by ${username} in ${chatId}`);
+                return socket.emit('messageError', { chatId, message: 'Access denied.' });
+            }
+
+            // readBy is added too: the unread badge counts messages whose
+            // readBy lacks you, and a hidden message can never be read - it
+            // would keep the chat badged forever. Deliberately no read
+            // receipt broadcast: deleting unseen is not reading.
+            const updated = await Message.findOneAndUpdate(
+                { _id: messageId, chat: chatId, deletedFor: { $ne: userId } },
+                { $addToSet: { deletedFor: userId, readBy: userId } },
+                { new: true, select: '_id' }
+            ).lean();
+
+            // Null when already hidden (the $ne guard, gotcha 2): idempotent,
+            // nothing changed, nothing to emit.
+            if (!updated) return;
+
+            // Personal room, not the chat room: this delete is invisible to
+            // everyone else, but the user's other open tabs must follow.
+            io.to(`user-${userId}`).emit('messageDeletedForMe', { chatId, messageId });
+            logger.info(`Message ${messageId} hidden for ${username} in chat ${chatId}`);
+        } catch (error) {
+            logger.error(`Error during 'deleteMessageForMe' for user ${username} (Socket: ${socket.id}), chat ${chatId}, message ${messageId}: ${error.message}`, error);
+            socket.emit('messageError', { chatId, message: 'Failed to delete message.' });
+        }
+    });
+
+    socket.on('deleteMessageForEveryone', async (data) => {
+        let chatId;
+        let messageId;
+        const { userId, username } = socket.user;
+
+        try {
+            ({ chatId, messageId } = data || {});
+
+            if (!chatId || !messageId) {
+                return socket.emit('messageError', { chatId, message: 'chatId and messageId are required to delete.' });
+            }
+
+            const chat = await findChatForParticipant(Chat, chatId, userId);
+            if (!chat) {
+                logger.warn(`Unauthorized deleteMessageForEveryone by ${username} in ${chatId}`);
+                return socket.emit('messageError', { chatId, message: 'Access denied.' });
+            }
+
+            const message = await Message.findOne({ _id: messageId, chat: chatId })
+                .select('sender fileUrl isDeletedForEveryone').lean();
+            if (!message) {
+                return socket.emit('messageError', { chatId, message: 'Message not found.' });
+            }
+            if (message.sender.toString() !== userId.toString()) {
+                logger.warn(`User ${username} tried to delete someone else's message ${messageId} for everyone`);
+                return socket.emit('messageError', { chatId, message: 'You can only delete your own messages for everyone.' });
+            }
+            if (message.isDeletedForEveryone) return; // idempotent
+
+            // The tombstone keeps no payload: content and file metadata are
+            // gone from the document, not merely hidden.
+            await Message.updateOne(
+                { _id: messageId },
+                {
+                    $set: { isDeletedForEveryone: true },
+                    $unset: { content: '', fileUrl: '', fileName: '', fileType: '', fileSize: '' }
+                }
+            );
+
+            // Best-effort: the file on disk serves nobody once the URL is gone.
+            if (message.fileUrl) removeUploadedFile(message.fileUrl);
+
+            // io.to includes the sender - same single event for everyone.
+            io.to(chatId).emit('messageDeletedForEveryone', { chatId, messageId });
+
+            // The deleted message may be the sidebar preview.
+            await invalidateChatCache(chat.participants.map(p => p.toString()));
+            logger.info(`Message ${messageId} deleted for everyone by ${username} in chat ${chatId}`);
+        } catch (error) {
+            logger.error(`Error during 'deleteMessageForEveryone' for user ${username} (Socket: ${socket.id}), chat ${chatId}, message ${messageId}: ${error.message}`, error);
+            socket.emit('messageError', { chatId, message: 'Failed to delete message.' });
         }
     });
 };

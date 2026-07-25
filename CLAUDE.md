@@ -163,8 +163,15 @@ Known-incomplete features, roughly in order of how much is already done for you:
 | ~~Delete or leave a chat~~ | done, now a **soft delete** | **done** — menu in `ChatWindowHeader` |
 | ~~View / edit own profile~~ | done | **done** — `ProfileModal` |
 | ~~File & image upload~~ | **done** — `POST /api/chat/:chatId/upload` | **done** — attach button, `sendAttachment`, bubble rendering |
+| ~~Message edit / delete~~ | **done** — `editMessage` / `deleteMessageForMe` / `deleteMessageForEveryone` socket events | **done** — bubble hover menu, inline edit, tombstone |
 | Group admin actions | commented stubs, `chatController.js:417` | none |
-| Message edit / delete | none | none |
+
+Message edit/delete notes (added 2026-07-24):
+- **All three handlers update with `updateOne`/`findOneAndUpdate`, never `save()`** — the `Message` post-save hook would overwrite `Chat.latestMessage` with an old message and un-hide soft-deleted chats. The flip side: the hook's cache invalidation doesn't run either, so edit and delete-for-everyone call `invalidateChatCache` themselves (it's back in the socket `deps` for exactly this).
+- **Edit**: own text messages only, within `EDIT_WINDOW_MS` (15 min, `chatEvents.js`) — enforced server-side; `MessageBubble` mirrors the constant only to hide the option. Broadcast is `io.to(chatId)` (`messageEdited`) — the sender applies the same event, there is no optimistic apply on this path. `editedAt`'s presence is the "edited" label.
+- **Delete for me**: any message; `Message.deletedFor` per-user hide (filtered in `getChatMessages`, `$ne` matches pre-field docs like Chat's). `readBy` is added in the same update or an unread hidden message would badge the chat forever (deliberately no read-receipt broadcast). Emitted to the **personal** room (`messageDeletedForMe`) so the user's other tabs follow; the `$ne` guard makes a repeat a silent no-op (gotcha 2 — null is success here).
+- **Delete for everyone**: sender only, any age. Sets `isDeletedForEveryone` and `$unset`s content + file fields — the tombstone has no payload — then removes the uploaded file from disk (`removeUploadedFile`, best-effort) and broadcasts `messageDeletedForEveryone` to the room. Clients render "This message was deleted".
+- No menu on `sending`/`failed` bubbles: their ids are client-only temp ids the server has never heard of.
 
 File upload notes (added 2026-07-24), for whoever touches attachments next:
 - **The upload is HTTP, the message is still the socket.** Picking a file opens `AttachmentPreview` (WhatsApp-style: shows the file, takes an optional caption, cancellable — nothing is uploaded until Send). `sendAttachment(chatId, file, caption)` then posts the file (`uploadController.js`, multer config in `utils/uploads.js`, 10 MB cap) and emits the regular `sendMessage` event with the returned metadata — the `chatEvents` handler had accepted attachment fields all along. Acks, ticks, and retry ride the existing path; retry re-uploads only if the bubble has no `fileUrl` yet.

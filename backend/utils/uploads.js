@@ -66,8 +66,22 @@ const uploadSingleFile = (req, res, next) => {
     });
 };
 
+// Best-effort removal of a stored upload (delete-for-everyone). basename()
+// guards against a crafted fileUrl reaching outside the uploads dir. Missing
+// files are fine - the message is the source of truth, the file is cargo.
+const removeUploadedFile = (fileUrl) => {
+    if (!fileUrl || !fileUrl.startsWith('/uploads/')) return;
+    const filePath = path.join(UPLOADS_DIR, path.basename(fileUrl));
+    fs.unlink(filePath, (err) => {
+        if (err && err.code !== 'ENOENT') {
+            logger.warn(`Could not remove uploaded file ${filePath}: ${err.message}`);
+        }
+    });
+};
+
 module.exports = {
     uploadSingleFile,
+    removeUploadedFile,
     messageTypeForMime,
     isInlineFile,
     decodeOriginalName,

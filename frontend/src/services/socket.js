@@ -34,6 +34,9 @@ class SocketService {
       userStatusUpdate: null,
       userConnectedToChat: null,
       messageSentAck: null,
+      messageEdited: null,
+      messageDeletedForEveryone: null,
+      messageDeletedForMe: null,
       chatError: null,
       messageError: null,
       statusError: null,
@@ -115,6 +118,9 @@ class SocketService {
     this.socket.on('userStatusUpdate', data => this.eventCallbacks.userStatusUpdate?.(data));
     this.socket.on('userConnectedToChat', data => this.eventCallbacks.userConnectedToChat?.(data));
     this.socket.on('messageSentAck', data => this.eventCallbacks.messageSentAck?.(data));
+    this.socket.on('messageEdited', data => this.eventCallbacks.messageEdited?.(data));
+    this.socket.on('messageDeletedForEveryone', data => this.eventCallbacks.messageDeletedForEveryone?.(data));
+    this.socket.on('messageDeletedForMe', data => this.eventCallbacks.messageDeletedForMe?.(data));
     this.socket.on('chatError', data => this.eventCallbacks.chatError?.(data));
     this.socket.on('messageError', data => this.eventCallbacks.messageError?.(data));
     this.socket.on('statusError', data => this.eventCallbacks.statusError?.(data));
@@ -141,6 +147,12 @@ class SocketService {
   joinChat(chatId) { this.emit('joinChat', { chatId }); }
   leaveChat(chatId) { this.emit('leaveChat', { chatId }); }
   sendMessage(data) { return this.emit('sendMessage', data); }
+  // All three return whether the emit went out (like sendMessage): there is
+  // no optimistic apply to roll back, but the caller should tell the user
+  // when the action was dropped instead of silently doing nothing.
+  editMessage(chatId, messageId, content) { return this.emit('editMessage', { chatId, messageId, content }); }
+  deleteMessageForMe(chatId, messageId) { return this.emit('deleteMessageForMe', { chatId, messageId }); }
+  deleteMessageForEveryone(chatId, messageId) { return this.emit('deleteMessageForEveryone', { chatId, messageId }); }
   typingStart(chatId) { this.emit('typingStart', { chatId }); }
   typingStop(chatId) { this.emit('typingStop', { chatId }); }
   markMessagesAsRead(chatId, messageIds) { this.emit('markMessagesAsRead', { chatId, messageIds }); }
@@ -191,6 +203,17 @@ class SocketService {
 
   onMessageSentAck(cb) { this._registerListener('messageSentAck', cb); }
   offMessageSentAck(cb) { this._unregisterListener('messageSentAck', cb); }
+
+  onMessageEdited(cb) { this._registerListener('messageEdited', cb); }
+  offMessageEdited(cb) { this._unregisterListener('messageEdited', cb); }
+
+  onMessageDeletedForEveryone(cb) { this._registerListener('messageDeletedForEveryone', cb); }
+  offMessageDeletedForEveryone(cb) { this._unregisterListener('messageDeletedForEveryone', cb); }
+
+  // Arrives on the personal room: a delete-for-me made in one tab must also
+  // disappear from the user's other open tabs.
+  onMessageDeletedForMe(cb) { this._registerListener('messageDeletedForMe', cb); }
+  offMessageDeletedForMe(cb) { this._unregisterListener('messageDeletedForMe', cb); }
 
   // All three error channels are consumed by ChatContext. chatError is not
   // only a message: it also repairs joinedChatsRef, which would otherwise keep
