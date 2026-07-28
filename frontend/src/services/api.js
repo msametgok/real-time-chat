@@ -69,6 +69,31 @@ const api = {
         return this.request('/api/auth/login', 'POST', { email, password });
     },
 
+    /**
+     * Start a guest session on the public demo deployment.
+     *
+     * Answers with the same {message, token, user} envelope as login, so the
+     * caller can hand the token straight to the normal auth flow. 404s unless
+     * the backend was started with DEMO_MODE=true.
+     * @returns {Promise<Object>} - {message, token, user}
+     */
+    async startDemoSession() {
+        return this.request('/api/auth/demo', 'POST', {});
+    },
+
+    /**
+     * Delete the current guest account and everything seeded for it.
+     *
+     * Fired on logout, best-effort: the server identifies the guest from the
+     * token and answers 200 either way, and a guest the request never reached
+     * gets collected by the server's sweeper instead.
+     * @param {String} token - JWT token
+     * @returns {Promise<Object>} - {removed}
+     */
+    async endDemoSession(token) {
+        return this.request('/api/auth/demo/end', 'POST', {}, token);
+    },
+
     /** 
      * Log out a user
      * @param {String} token - JWT token

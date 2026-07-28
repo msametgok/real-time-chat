@@ -4,12 +4,33 @@ import { useAuth } from "../../hooks/useAuth";
 import ErrorMessage from "../common/ErrorMessage";
 import LoadingSpinner from "../common/LoadingSpinner";
 
+/**
+ * Only the public demo deployment sets this. Everywhere else the block below
+ * is not rendered at all, so a normal build has no demo affordance to find.
+ */
+const DEMO_ENABLED = import.meta.env.VITE_DEMO_MODE === 'true';
+
 function LoginForm() {
-  const { login, loading: authLoading, authError } = useAuth();
+  const { login, startDemo, loading: authLoading, authError } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [localError, setLocalError] = useState("");
+  // Tracked separately from authLoading so only the button that was actually
+  // pressed shows a spinner.
+  const [demoStarting, setDemoStarting] = useState(false);
+
+  const handleDemo = async () => {
+    setLocalError("");
+    setDemoStarting(true);
+    try {
+      await startDemo();
+    } catch (error) {
+      setLocalError(error.message);
+    } finally {
+      setDemoStarting(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -43,6 +64,40 @@ function LoginForm() {
         </div>
       )}
       
+      {/* The primary action on the public demo. A visitor arriving from a
+          portfolio link is not going to fill in a registration form, so the
+          demo gets the top of the card and the form drops to secondary. */}
+      {DEMO_ENABLED && (
+        <div className="mb-8">
+          <button
+            type="button"
+            onClick={handleDemo}
+            disabled={authLoading || demoStarting}
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-3 px-4 rounded-lg shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-800 transition duration-150 ease-in-out transform hover:scale-105 disabled:opacity-70 disabled:cursor-not-allowed disabled:hover:scale-100"
+          >
+            {demoStarting ? (
+              <div className="flex items-center justify-center">
+                <LoadingSpinner />
+                <span className="ml-2">Setting up your demo…</span>
+              </div>
+            ) : (
+              'Try the live demo'
+            )}
+          </button>
+          <p className="text-xs text-slate-400 mt-3 text-center leading-relaxed">
+            No sign-up. You get a guest account with three people to talk to —
+            one offline, one online, one reading — so you can watch the delivery
+            ticks and typing indicators behave differently for each.
+          </p>
+
+          <div className="flex items-center gap-3 mt-8" aria-hidden="true">
+            <span className="h-px flex-1 bg-slate-700" />
+            <span className="text-xs uppercase tracking-wider text-slate-500">or sign in</span>
+            <span className="h-px flex-1 bg-slate-700" />
+          </div>
+        </div>
+      )}
+
       {/* The form element itself - action and method are handled by React's onSubmit */}
       <form onSubmit={handleSubmit} noValidate>
         <div className="mb-6">

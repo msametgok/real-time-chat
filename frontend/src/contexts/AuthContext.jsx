@@ -5,6 +5,9 @@ import socketService from "../services/socket";
 
 export const AuthContext = createContext(null);
 
+/** Only the public demo build sets this - see LoginForm. */
+const DEMO_ENABLED = import.meta.env.VITE_DEMO_MODE === 'true';
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -113,8 +116,51 @@ export function AuthProvider({ children }) {
     }
   };
 
+  /**
+   * Public-demo entry point: the server mints a throwaway guest account with
+   * its chats already seeded and returns the same envelope as login, so from
+   * here on this is an ordinary session with no demo-specific handling.
+   *
+   * Deliberately no email/password step. A visitor arriving from a portfolio
+   * link will not fill in a registration form to look at a side project.
+   */
+  const startDemo = async () => {
+    setLoading(true);
+    setAuthError(null);
+    try {
+      const response = await api.startDemoSession();
+      if (!response.token) {
+        throw new Error("Demo response did not include a token");
+      }
+      localStorage.setItem("token", response.token);
+      await fetchUserProfile(response.token);
+      navigate("/chat", { replace: true });
+    } catch (error) {
+      console.error("AuthContext: Demo session failed", error);
+      setAuthError(error.message || "Could not start the demo. Please try again.");
+      setIsAuthenticated(false);
+      setUser(null);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const logout = useCallback(() => {
     setAuthError(null);
+
+    // Demo guests are disposable: ask the server to delete this account and
+    // its seeded chats on the way out. Fired BEFORE the token is cleared,
+    // since that token is the only thing identifying which guest to remove.
+    //
+    // Best-effort by design. It is a no-op for a real user, the server answers
+    // 200 either way, and anything that never arrives is collected by the
+    // server-side sweeper - which is the path most visitors take anyway, since
+    // closing a tab fires no request at all.
+    if (DEMO_ENABLED && user?.token) {
+      api.endDemoSession(user.token).catch(() => {});
+    }
+
     // Notify server (optional)
     api.logout({}).catch(() => {});
     // Disconnect sockets
@@ -125,7 +171,9 @@ export function AuthProvider({ children }) {
     setUser(null);
     setIsAuthenticated(false);
     navigate('/login', { replace: true });
-  }, [navigate]);
+    // `user` is a dependency now: the demo cleanup above reads its token, and
+    // a stale closure would send the previous guest's token or none at all.
+  }, [navigate, user]);
 
   // React to changes in other tabs
   useEffect(() => {
@@ -159,6 +207,7 @@ export function AuthProvider({ children }) {
         authError,
         login,
         register,
+        startDemo,
         logout,
         fetchUserProfile
       }}
