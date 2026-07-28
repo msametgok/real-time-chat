@@ -57,6 +57,18 @@ const apiLimiter = rateLimit({
 // Apply auth rate limiter to login/register endpoints
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
+// Same limit for demo session CREATION. Every call creates a user, four chats
+// and a dozen messages, so it is the cheapest way to fill a free-tier database
+// from the outside.
+//
+// app.post, not app.use: use() matches by prefix, so it also caught
+// /api/auth/demo/end - throttling the endpoint whose whole job is DELETING a
+// guest. That is backwards, and exploitable in the obvious direction: burn the
+// five-per-minute budget and the creations are stopped but so is every
+// cleanup, leaving the guests behind. /demo/end is left to the general /api
+// limiter above.
+app.post('/api/auth/demo', authLimiter);
+
 // Apply general rate limiter to all API routes under /api
 app.use('/api', apiLimiter);
 

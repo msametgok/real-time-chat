@@ -26,6 +26,18 @@ const userSchema = new mongoose.Schema({
     avatar: {
         type: String,
         default: null
+    },
+    /**
+     * Marks the demo companions and the throwaway guest accounts the public
+     * demo hands out. Exists so cleanup has something to filter on - guests
+     * accumulate on every visit and Atlas M0 is 512 MB.
+     *
+     * Never set through any user-facing route: only demo/seed.js writes it.
+     */
+    isDemo: {
+        type: Boolean,
+        default: false,
+        index: true
     }
 }, {
     timestamps: true

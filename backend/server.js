@@ -5,6 +5,8 @@ const connectDB = require('./config/db');
 const { initializeSocket } = require('./config/socket');
 const logger = require('./config/logger');
 const redisClient = require('./config/redis');
+const { startDemoBots, stopDemoBots } = require('./demo/bots');
+const { startGuestSweeper, stopGuestSweeper } = require('./demo/cleanup');
 require('dotenv').config();
 
 const PORT = process.env.PORT || 5000;
@@ -33,6 +35,16 @@ async function startServer() {
 
     server.listen(PORT, () => {
       logger.info(`Server is running on PORT:${PORT}`);
+
+      // After listen(), never before: the companion bots are socket.io-clients
+      // that dial back into this very server over loopback, so starting them
+      // any earlier only buys a round of ECONNREFUSED and a retry wait.
+      // No-ops entirely unless DEMO_MODE=true.
+      startDemoBots();
+
+      // Collects guests whose visitor closed the tab instead of logging out,
+      // which is most of them. Sweeps once now, then hourly.
+      startGuestSweeper();
     });
   } catch (error) {
     logger.error('Failed to connect to MongoDB or start the server', error);
@@ -57,6 +69,12 @@ const gracefulShutdown = async (signal, exitCode = 0) => {
   }, 15000);
 
   try {
+    // 0. Drop the demo bots first. They hold open sockets and pending timers,
+    // so leaving them running means io.close() waits on connections that are
+    // ours, and a timer can still fire a send into a closing server.
+    stopDemoBots();
+    stopGuestSweeper();
+
     // 1. Close Socket.IO server (stops accepting new socket connections and closes existing ones)
     if (io) {
       await new Promise((resolve) => {
