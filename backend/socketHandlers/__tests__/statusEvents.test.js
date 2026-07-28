@@ -316,15 +316,49 @@ describe('markChatAsRead', () => {
         expect(broadcast.payload.reader).toEqual({ userId: 'user-1', username: 'alice' });
     });
 
-    // readBy is read BEFORE the update here, unlike markMessagesAsRead which
-    // re-reads after. Forgetting to add this reader in means nothing is ever
-    // reported as read-by-all and the sender's ticks never complete.
+    // read-by-all is decided from a re-read AFTER the write, like
+    // markMessagesAsRead. The first find is the pre-update snapshot used only
+    // to collect ids for the broadcast; it still shows readBy empty.
     it('counts this reader when deciding read-by-all', async () => {
         const h = buildHarness();
         h.Chat.findOne.mockReturnValue(selectLean({ participants: ['user-1', 'user-2'] }));
-        h.Message.find.mockReturnValue(selectLean([
-            { _id: 'msg-1', sender: 'user-2', readBy: [] }
-        ]));
+        h.Message.find
+            .mockReturnValueOnce(selectLean([{ _id: 'msg-1', sender: 'user-2', readBy: [] }]))
+            .mockReturnValueOnce(selectLean([{ _id: 'msg-1', sender: 'user-2', readBy: ['user-1'] }]));
+        h.Message.updateMany.mockResolvedValue({ modifiedCount: 1 });
+
+        await h.handlers.markChatAsRead({ chatId });
+
+        const broadcast = h.roomEmits.find(e => e.event === 'messagesReadUpdate');
+        expect(broadcast.payload.messagesReadByAll).toEqual(['msg-1']);
+    });
+
+    /**
+     * Regression guard for a race that only shows up with two readers.
+     *
+     * This handler used to compute read-by-all from the PRE-update snapshot
+     * with the reader spliced in by hand. When two participants open a group
+     * chat in the same moment, each one's snapshot predates the other's write,
+     * so both computed false and NEITHER broadcast read-by-all - the sender's
+     * ticks stayed grey permanently even though everyone had read it. Nothing
+     * re-runs to repair it.
+     *
+     * Found by the demo: two bots reading a group at the same instant, ticks
+     * that never turned blue. Against the old code this test fails, because
+     * the hand-spliced snapshot can only ever know about one reader.
+     */
+    it('reports read-by-all when a concurrent reader landed between the read and the write', async () => {
+        const h = buildHarness();
+        h.Chat.findOne.mockReturnValue(selectLean({
+            participants: ['user-1', 'user-2', 'user-3']
+        }));
+        h.Message.find
+            // Snapshot taken before either reader wrote.
+            .mockReturnValueOnce(selectLean([{ _id: 'msg-1', sender: 'user-2', readBy: [] }]))
+            // By the time this handler re-reads, user-3 has written too.
+            .mockReturnValueOnce(selectLean([
+                { _id: 'msg-1', sender: 'user-2', readBy: ['user-1', 'user-3'] }
+            ]));
         h.Message.updateMany.mockResolvedValue({ modifiedCount: 1 });
 
         await h.handlers.markChatAsRead({ chatId });

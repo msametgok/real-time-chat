@@ -130,13 +130,28 @@ module.exports = ({ io, socket, logger, redis, Message, Chat }) => {
                 { $addToSet: { readBy: readerId } }
             );
 
-            // computeReadByAll reads the pre-update readBy, so add this reader
-            // in before asking - otherwise nothing is ever "read by all".
-            const readByAll = unread
-                .filter(msg => computeReadByAll(
-                    { ...msg, readBy: [...(msg.readBy || []), readerId] },
-                    chat.participants
-                ))
+            // Re-read AFTER the write instead of reasoning from the snapshot
+            // above, exactly as markMessagesAsRead does.
+            //
+            // This used to take `unread` (read BEFORE the update) and splice
+            // the reader in by hand. That is correct for one reader at a time
+            // and quietly wrong for two: when two participants open a group
+            // chat in the same moment, each one's snapshot predates the
+            // other's write, so each computes "read by all" as false and
+            // NEITHER broadcasts it. The sender's ticks then stay grey
+            // forever - every recipient has read the message, and nothing will
+            // ever say so, because both handlers already ran and neither will
+            // run again.
+            //
+            // Re-reading makes the last writer see the complete set, so at
+            // least one of the racing handlers always reports it.
+            const afterWrite = await Message.find({
+                _id: { $in: messageIds },
+                chat: chatId
+            }).select('sender readBy').lean();
+
+            const readByAll = afterWrite
+                .filter(msg => computeReadByAll(msg, chat.participants))
                 .map(msg => msg._id.toString());
 
             logger.info(`${readerName} marked all ${messageIds.length} unread messages as read in chat ${chatId}.`);
