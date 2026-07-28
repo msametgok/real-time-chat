@@ -36,7 +36,19 @@ const SYNC_MESSAGE_LIMIT = 50;
 
 const initializeSocket = async (server) => {
   const io = socketIo(server, {
-    cors: { origin: process.env.CLIENT_URL, methods: ['GET','POST'], credentials: true },
+    // Same fallback as the Express CORS config in app.js. This used to be a
+    // bare process.env.CLIENT_URL: unset, that is `origin: undefined`, which
+    // rejects every browser handshake while plain HTTP keeps working - so the
+    // app loads, logs in, and simply has no realtime. Worth knowing when
+    // deploying: CLIENT_URL must be the exact frontend origin, scheme included
+    // and no trailing slash, or the same silent failure comes back.
+    //
+    // Node clients (the demo bots) send no Origin header and are unaffected.
+    cors: {
+      origin: process.env.CLIENT_URL || 'http://localhost:5173',
+      methods: ['GET','POST'],
+      credentials: true
+    },
 
     // Defaults are 25s between pings and 20s to answer one, so a connection
     // that dies WITHOUT a close frame - laptop lid, wifi drop, DevTools

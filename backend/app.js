@@ -12,6 +12,18 @@ const { isInlineFile, UPLOADS_DIR } = require('./utils/uploads');
 
 const app = express();
 
+// Every managed host (Render, Fly, Railway) terminates TLS at a proxy and
+// forwards the real client IP in X-Forwarded-For. Without this, req.ip is the
+// proxy's address for EVERY request, so the rate limiters below bucket the
+// whole internet together: five login attempts per minute across all visitors,
+// not per visitor. express-rate-limit v8 also emits a validation error the
+// moment it sees X-Forwarded-For with trust proxy off.
+//
+// 1 = trust exactly one hop. Deliberately not `true` - that trusts the entire
+// chain, letting a client forge X-Forwarded-For and get its own private
+// rate-limit bucket, which is worse than no limiting at all.
+app.set('trust proxy', 1);
+
 app.use(helmet());
 app.use(express.json());
 app.use(cors({
@@ -45,7 +57,6 @@ const apiLimiter = rateLimit({
 // Apply auth rate limiter to login/register endpoints
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
-
 // Apply general rate limiter to all API routes under /api
 app.use('/api', apiLimiter);
 
