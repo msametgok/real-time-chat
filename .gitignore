@@ -355,3 +355,5 @@ gradle-app.setting
 
 # User-uploaded chat files - runtime data, never source
 backend/uploads/
+
+CODEBASE-READING-GUIDE.txt
