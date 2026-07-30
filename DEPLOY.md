@@ -130,13 +130,24 @@ Back on Render, set:
 CLIENT_URL=https://<name>.vercel.app
 ```
 
-Exact origin: scheme included, **no trailing slash**. This feeds both the
-Express CORS config (`app.js`) and the Socket.IO handshake
-(`config/socket.js`). Get it wrong and the failure is quiet and misleading -
-the site loads, login works, and realtime simply never connects, because only
-the WebSocket handshake is rejected.
+Exact origin, scheme included. This feeds both the Express CORS config
+(`app.js`) and the Socket.IO handshake (`config/socket.js`), which share one
+resolver in `config/clientOrigin.js`.
 
-Redeploy the backend.
+**This step is not optional, and skipping it is the single most confusing way
+this deploy can fail.** Unset, the resolver falls back to `http://localhost:5173`
+and the backend advertises *that* as the only permitted origin. The site then
+loads (static files, no backend involved) and every single API call dies as an
+unexplained `Network Error` with no status - identical to the backend being
+down, which is where the diagnosis usually goes wrong. It happened on
+2026-07-29. Two things now make it findable: a production boot with `CLIENT_URL`
+missing or empty logs an explicit error in the Render log, and a **trailing
+slash is stripped** rather than silently matching nothing.
+
+On Render: left sidebar → **Environment** → **+ Add Environment Variable** →
+then pick **"Save and deploy"** from the save dropdown. "Save only" stores the
+value without applying it, so the site stays broken and the fix looks like it
+did not work. No rebuild is needed - this is read at runtime.
 
 ## 6. Keep it awake
 

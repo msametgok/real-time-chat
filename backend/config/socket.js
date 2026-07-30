@@ -4,6 +4,7 @@ const { createAdapter } = require('@socket.io/redis-adapter');
 const jwt = require('jsonwebtoken');
 const logger = require('./logger');
 const redis = require('./redis');
+const { clientOrigin } = require('./clientOrigin');
 const { encrypt, decryptMessageDoc } = require('../utils/encryption');
 const User = require('../models/User');
 const Chat = require('../models/Chat');
@@ -36,16 +37,16 @@ const SYNC_MESSAGE_LIMIT = 50;
 
 const initializeSocket = async (server) => {
   const io = socketIo(server, {
-    // Same fallback as the Express CORS config in app.js. This used to be a
-    // bare process.env.CLIENT_URL: unset, that is `origin: undefined`, which
-    // rejects every browser handshake while plain HTTP keeps working - so the
-    // app loads, logs in, and simply has no realtime. Worth knowing when
-    // deploying: CLIENT_URL must be the exact frontend origin, scheme included
-    // and no trailing slash, or the same silent failure comes back.
+    // The exact same resolved origin the Express CORS config uses, from
+    // config/clientOrigin.js. This was once a bare process.env.CLIENT_URL:
+    // unset, that is `origin: undefined`, which rejects every browser handshake
+    // while plain HTTP keeps working - so the app loads, logs in, and simply has
+    // no realtime. The shared resolver strips a trailing slash and warns on a
+    // production fallback, because a wrong value here fails just as quietly.
     //
     // Node clients (the demo bots) send no Origin header and are unaffected.
     cors: {
-      origin: process.env.CLIENT_URL || 'http://localhost:5173',
+      origin: clientOrigin,
       methods: ['GET','POST'],
       credentials: true
     },

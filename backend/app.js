@@ -8,6 +8,7 @@ const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const logger = require('./config/logger');
+const { clientOrigin } = require('./config/clientOrigin');
 const { isInlineFile, UPLOADS_DIR } = require('./utils/uploads');
 
 const app = express();
@@ -26,8 +27,11 @@ app.set('trust proxy', 1);
 
 app.use(helmet());
 app.use(express.json());
+// Single allowed browser origin, resolved in config/clientOrigin.js - which also
+// warns when a production boot falls back to the dev default. Sharing the
+// resolver with the Socket.IO handshake keeps the two from ever disagreeing.
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: clientOrigin,
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
