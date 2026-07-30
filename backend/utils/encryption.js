@@ -20,7 +20,7 @@ exports.encrypt = (text) => {
         encrypted += cipher.final('base64');
         return `${iv.toString('base64')}:${encrypted}`;
     } catch (error) {
-        // winston, not console - see CLAUDE.md. Never log `text` itself.
+        // winston, not console - see ENGINEERING-NOTES.md. Never log `text` itself.
         logger.error(`Encryption error: ${error.message}`);
         throw error;
     }

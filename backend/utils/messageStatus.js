@@ -4,7 +4,7 @@
  * "Has everyone else seen this?" was written out by hand at five call sites in
  * two idioms - some comparing raw ObjectIds, some stringifying - which is the
  * kind of thing that fails silently rather than throwing (see gotcha 9 in
- * CLAUDE.md). This is the single implementation.
+ * ENGINEERING-NOTES.md). This is the single implementation.
  *
  * The sender is always excluded: a message is delivered/read by its author by
  * definition, and counting them would mean a 1-on-1 chat never reaches

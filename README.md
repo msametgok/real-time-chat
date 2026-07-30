@@ -110,6 +110,11 @@ socket 'sendMessage'
        └─ delivery receipts for each participant currently online
 ```
 
+**[ENGINEERING-NOTES.md](ENGINEERING-NOTES.md)** goes further: the full
+convention list, per-subsystem implementation notes, and a numbered list of
+twelve traps that have each caused a real bug in this codebase — most of them
+silent no-ops rather than crashes, which is why they are written down.
+
 ---
 
 ## Getting started

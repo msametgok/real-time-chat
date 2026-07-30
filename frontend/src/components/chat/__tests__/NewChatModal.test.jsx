@@ -22,7 +22,7 @@ beforeEach(() => {
     vi.clearAllMocks();
     // The search is debounced 250ms. Without shouldAdvanceTime every
     // `await user.type(...)` deadlocks on a microtask the frozen clock never
-    // flushes - see the frontend timer-test note in CLAUDE.md.
+    // flushes - see the frontend timer-test note in ENGINEERING-NOTES.md.
     vi.useFakeTimers({ shouldAdvanceTime: true });
     user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     onClose = vi.fn();
